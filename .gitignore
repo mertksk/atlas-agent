@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.next/
+target/
+wasm/
+*.pem
+.env
+.env.*
+!.env.example
+data/
+**/data/ledger.json
+
+# external facilitator (reproduce via scripts/setup-facilitator.sh)
+vendor/

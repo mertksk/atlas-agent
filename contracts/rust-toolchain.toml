@@ -1,0 +1,8 @@
+# Odra 2.8 pulls odra-macros 2.8.x (needs `#![feature(box_patterns)]` -> nightly),
+# while current transitive deps (base64ct, wat) require Cargo's `edition2024`
+# (stabilized in 1.85). nightly-2025-02-04 (cargo 1.86) satisfies both. The
+# original `stable` pin could never build wasm; an older nightly fails on
+# edition2024. Pinned for reproducible contract builds.
+[toolchain]
+channel = "nightly-2025-02-04"
+targets = ["wasm32-unknown-unknown"]

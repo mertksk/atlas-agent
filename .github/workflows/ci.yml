@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  node:
+    name: typecheck + tests (agent, services, web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: install (workspaces: services + agent)
+        run: npm ci
+      - name: typecheck
+        run: npm run typecheck
+      - name: unit tests
+        run: npm test
+      - name: e2e (offline: mock x402 + dry-run pipeline)
+        run: npm run test:e2e
+      - name: resilience (dependency-outage degradation)
+        run: npm run test:resilience
+      - name: web typecheck + build
+        working-directory: web
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+  contracts:
+    name: contracts test + wasm build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: wasm tooling (wasm-strip, wasm-opt)
+        run: sudo apt-get update && sudo apt-get install -y wabt binaryen
+      - name: rust toolchain (pinned nightly + wasm32)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-02-04
+          targets: wasm32-unknown-unknown
+      - name: unit tests (Odra VM)
+        working-directory: contracts
+        run: cargo test
+      - name: build wasm (per-module, sign-ext lowered)
+        working-directory: contracts
+        run: bash build-wasm.sh

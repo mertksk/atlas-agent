@@ -1,0 +1,5 @@
+[[contracts]]
+fqn = "atlas_contracts::treasury_vault::TreasuryVault"
+
+[[contracts]]
+fqn = "atlas_contracts::decision_registry::DecisionRegistry"

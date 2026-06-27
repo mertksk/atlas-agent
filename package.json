@@ -1,0 +1,20 @@
+{
+  "name": "atlas-agent",
+  "private": true,
+  "workspaces": ["services", "agent"],
+  "scripts": {
+    "services": "npm run dev -w services",
+    "agent": "npm run dev -w agent",
+    "agent:run": "npm run analyze -w agent",
+    "web": "cd web && npm run dev",
+    "typecheck": "npm run typecheck -w services && npm run typecheck -w agent",
+    "test": "npm run test -w services && npm run test -w agent",
+    "test:e2e": "node --import tsx test/e2e.mts",
+    "test:resilience": "node --import tsx test/resilience.mts",
+    "monitor": "node scripts/monitor.mjs",
+    "stack": "npx pm2 start ecosystem.config.cjs",
+    "stack:stop": "npx pm2 delete ecosystem.config.cjs",
+    "stack:status": "npx pm2 status",
+    "stack:logs": "npx pm2 logs"
+  }
+}

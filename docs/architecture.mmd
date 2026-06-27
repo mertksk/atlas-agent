@@ -1,0 +1,30 @@
+flowchart LR
+  subgraph Marketplace["x402 data services :4021"]
+    OPP["/opportunities (free)"]
+    RISK["/api/risk-score 0.5 CSPR"]
+    LIQ["/api/liquidity 0.3 CSPR"]
+    DOC["/api/rwa-doc 0.8 CSPR"]
+    SIG["/api/market-signal 0.4 CSPR"]
+  end
+
+  subgraph Agent["Atlas agent :4030"]
+    SC[Scout] --> AN[Analyst]
+    AN --> RO[Risk Officer]
+    RO --> TR["Treasurer (Claude or scorer)"]
+    TR --> PG[Policy Guard]
+    PG --> EX[Executor]
+  end
+
+  subgraph Casper["Casper Testnet"]
+    VAULT["TreasuryVault (policy enforced on-chain)"]
+    REG["DecisionRegistry (audit trail)"]
+  end
+
+  UI["Dashboard :3000"] -->|"poll state · run · approve"| Agent
+  MCP["MCP host (Claude Desktop, ...)"] -->|"5 tools"| Agent
+
+  SC -->|GET| OPP
+  AN -->|"402 → PAYMENT-SIGNATURE → receipt"| RISK & LIQ & DOC & SIG
+  RISK & LIQ & DOC -.->|"settle (facilitator mode)"| FAC["x402 facilitator → CEP-18 transfer"]
+  EX -->|"record_decision (every decision)"| REG
+  EX -->|"execute_allocation (cleared only)"| VAULT

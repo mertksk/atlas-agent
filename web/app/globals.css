@@ -1,0 +1,482 @@
+/* Atlas — design tokens
+   An automated treasury back-office: ink navy, vault brass, ledger rules.
+   The signature element is the decision ledger: ruled rows like a bank book,
+   because the product IS an auditable ledger of money decisions. */
+
+:root {
+  --ink-0: #0b1220; /* page */
+  --ink-1: #111a2e; /* panel */
+  --ink-2: #182338; /* raised */
+  --rule: #243150; /* hairline rules */
+  --brass: #c9a85c; /* vault brass — accent, sparingly */
+  --brass-dim: #8c7440;
+  --mint: #7fd1b9; /* allocations, settled */
+  --rust: #d96c5f; /* rejections, risk */
+  --text: #edf1f7;
+  --muted: #9aa7bd;
+  --faint: #5d6a83;
+
+  --font-display: var(--sg), "Avenir Next", sans-serif;
+  --font-body: var(--inter), system-ui, sans-serif;
+  --font-mono: var(--plex), "SF Mono", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--ink-0);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+}
+::selection {
+  background: var(--brass);
+  color: var(--ink-0);
+}
+a {
+  color: var(--brass);
+}
+button {
+  font: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------- shell */
+.shell {
+  max-width: 1380px;
+  margin: 0 auto;
+  padding: 0 28px 64px;
+}
+.masthead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 30px 0 18px;
+  border-bottom: 1px solid var(--rule);
+}
+.wordmark {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.wordmark h1 {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  margin: 0;
+}
+.wordmark h1 em {
+  font-style: normal;
+  color: var(--brass);
+}
+.wordmark .tag {
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.mast-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chip.live {
+  border-color: var(--mint);
+  color: var(--mint);
+}
+.chip.dry {
+  border-color: var(--brass-dim);
+  color: var(--brass);
+}
+
+.run-btn {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  background: var(--brass);
+  color: var(--ink-0);
+  border: none;
+  border-radius: 6px;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.run-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(201, 168, 92, 0.25);
+}
+.run-btn:disabled {
+  background: var(--ink-2);
+  color: var(--faint);
+  cursor: default;
+}
+
+/* ------------------------------------------------------------- grid */
+.grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 380px;
+  gap: 26px;
+  padding-top: 26px;
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: var(--ink-1);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 18px;
+}
+.panel + .panel {
+  margin-top: 22px;
+}
+.panel h2 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin: 0 0 14px;
+}
+
+/* ------------------------------------------------------------- rail */
+.figure {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+}
+.figure small {
+  font-size: 15px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-left: 6px;
+}
+.rail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px dotted var(--rule);
+  font-size: 13px;
+}
+.rail-row:last-child {
+  border-bottom: none;
+}
+.rail-row .k {
+  color: var(--muted);
+}
+.rail-row .v {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.depleted {
+  height: 4px;
+  background: var(--ink-2);
+  border-radius: 2px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+.depleted i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--brass-dim), var(--brass));
+  transition: width 400ms ease;
+}
+
+/* ----------------------------------------------------- opportunities */
+.opp {
+  background: var(--ink-1);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  position: relative;
+}
+.opp.allocated {
+  border-color: rgba(127, 209, 185, 0.45);
+}
+.opp.rejected {
+  border-color: rgba(217, 108, 95, 0.4);
+}
+.opp.queued {
+  border-color: rgba(201, 168, 92, 0.5);
+}
+.opp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.opp-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+}
+.opp-head .cat {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+.apy {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--muted);
+}
+.apy b {
+  color: var(--text);
+  font-weight: 600;
+}
+.apy.absurd b {
+  color: var(--rust);
+}
+
+.action {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  padding: 3px 10px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.action.ALLOCATE {
+  background: rgba(127, 209, 185, 0.12);
+  color: var(--mint);
+}
+.action.REJECT {
+  background: rgba(217, 108, 95, 0.12);
+  color: var(--rust);
+}
+.action.HOLD {
+  background: var(--ink-2);
+  color: var(--muted);
+}
+.action.QUEUE_FOR_APPROVAL {
+  background: rgba(201, 168, 92, 0.14);
+  color: var(--brass);
+}
+
+.riskbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.riskbar .track {
+  flex: 1;
+  height: 4px;
+  background: var(--ink-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.riskbar .track i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+.opp .why {
+  color: var(--muted);
+  font-size: 13.5px;
+  margin: 8px 0 0;
+}
+.opp .bought {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--faint);
+  margin-top: 10px;
+}
+.opp .bought b {
+  color: var(--brass);
+  font-weight: 500;
+}
+
+/* approvals */
+.approval {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 16px;
+  border: 1px solid rgba(201, 168, 92, 0.5);
+  background: rgba(201, 168, 92, 0.06);
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+.approval .what {
+  font-size: 13.5px;
+}
+.approval .what b {
+  font-family: var(--font-mono);
+}
+.approve-btn {
+  background: transparent;
+  border: 1px solid var(--brass);
+  color: var(--brass);
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.approve-btn:hover {
+  background: var(--brass);
+  color: var(--ink-0);
+}
+
+/* ----------------------------------------------------------- ledger */
+/* The signature: a ruled ledger book. Each entry sits on its own rule,
+   timestamp set in the left margin like a posting date. */
+.ledger {
+  max-height: 560px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
+.entry {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 12px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 13px;
+  animation: post 320ms ease;
+}
+.entry:first-child {
+  border-top: 1px solid var(--rule);
+}
+@keyframes post {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .entry {
+    animation: none;
+  }
+  .run-btn,
+  .depleted i {
+    transition: none;
+  }
+}
+.entry time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+  padding-top: 2px;
+}
+.entry .who {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 1px;
+}
+.who.scout {
+  color: #8fb7e8;
+}
+.who.analyst {
+  color: var(--brass);
+}
+.who.risk-officer {
+  color: #c9a0e8;
+}
+.who.treasurer {
+  color: var(--mint);
+}
+.who.policy-guard {
+  color: var(--rust);
+}
+.who.executor {
+  color: #e8d18f;
+}
+.who.system {
+  color: var(--faint);
+}
+.entry .msg {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* payments */
+.pay {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  padding: 6px 0;
+  border-bottom: 1px dotted var(--rule);
+}
+.pay:last-child {
+  border-bottom: none;
+}
+.pay .amt {
+  color: var(--brass);
+}
+.pay .tx {
+  color: var(--faint);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  color: var(--faint);
+  font-size: 13px;
+  padding: 6px 0;
+}
+.foot {
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+  color: var(--faint);
+  font-size: 12.5px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
