@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Onboarding from "./Onboarding";
 
 const AGENT = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:4030";
 
@@ -222,6 +223,7 @@ export default function Dashboard() {
 
   return (
     <div className="shell">
+      <Onboarding />
       {/* ---------------------------------------------------------- masthead */}
       <header className="masthead">
         <div className="wordmark">
@@ -523,7 +525,15 @@ export default function Dashboard() {
           Atlas Agent — Casper Agentic Buildathon 2026. Contracts in Odra; evidence paid over x402; every decision
           recorded on the Casper DecisionRegistry.
         </span>
-        <span className="mono">{state?.network ?? "casper-test"}</span>
+        <span className="mono">
+          {state?.network ?? "casper-test"} ·{" "}
+          <button
+            className="intro-link"
+            onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("atlas:intro"))}
+          >
+            replay intro
+          </button>
+        </span>
       </footer>
     </div>
   );
