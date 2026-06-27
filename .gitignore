@@ -12,3 +12,8 @@ data/
 
 # external facilitator (reproduce via scripts/setup-facilitator.sh)
 vendor/
+
+# local preview/tooling config
+.claude/
+.DS_Store
+*.tsbuildinfo

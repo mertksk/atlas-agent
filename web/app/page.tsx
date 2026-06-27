@@ -66,8 +66,87 @@ interface Payment {
   at?: string;
   settlement?: { transaction?: string; mode?: string };
 }
+interface Metrics {
+  uptimeSec: number;
+  runs: number;
+  decisions: number;
+  reasoner?: string;
+  lastError?: { message: string; at: string } | null;
+}
+interface Health {
+  ok: boolean;
+  uptimeSec: number;
+  lastError: { message: string; at: string } | null;
+  deps: { services: boolean };
+}
+
+/* ---------------------------------------------------------- the agent pipeline */
+const ROLES = [
+  { key: "scout", label: "Scout" },
+  { key: "analyst", label: "Analyst" },
+  { key: "risk-officer", label: "Risk Officer" },
+  { key: "treasurer", label: "Treasurer" },
+  { key: "policy-guard", label: "Policy Guard" },
+  { key: "executor", label: "Executor" },
+] as const;
+const ROLE_COLOR: Record<string, string> = {
+  scout: "var(--steel)",
+  analyst: "var(--copper)",
+  "risk-officer": "var(--violet)",
+  treasurer: "var(--jade)",
+  "policy-guard": "var(--coral)",
+  executor: "var(--gold)",
+};
 
 const cspr = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+const fmtDur = (s?: number) => {
+  if (s == null) return "—";
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+};
+
+/** Tween a number toward its target (ease-out cubic) for the vault figure. */
+function useCountUp(target: number, ms = 750): number {
+  const [val, setVal] = useState(0);
+  const from = useRef(0);
+  useEffect(() => {
+    const start = from.current;
+    if (start === target) return;
+    let raf = 0;
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      const p = Math.min((t - t0) / ms, 1);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setVal(start + (target - start) * eased);
+      if (p < 1) raf = requestAnimationFrame(tick);
+      else from.current = target;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, ms]);
+  return val;
+}
+
+/** Derive which agents have spoken in the current/last run, and who's active. */
+function pipelineState(ledger: Entry[], running: boolean) {
+  let start = 0;
+  for (let i = ledger.length - 1; i >= 0; i--) {
+    if (ledger[i].agent === "system" && /start/i.test(ledger[i].message)) {
+      start = i;
+      break;
+    }
+  }
+  const counts: Record<string, number> = {};
+  let last: string | null = null;
+  for (const e of ledger.slice(start)) {
+    if (e.agent === "system") continue;
+    counts[e.agent] = (counts[e.agent] ?? 0) + 1;
+    last = e.agent;
+  }
+  return { counts, current: running ? last : null };
+}
 
 /* -------------------------------------------------------------- page */
 export default function Dashboard() {
@@ -76,6 +155,8 @@ export default function Dashboard() {
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [ledger, setLedger] = useState<Entry[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
   const [offline, setOffline] = useState(false);
   const [token, setToken] = useState("");
   const cursor = useRef(0);
@@ -87,17 +168,18 @@ export default function Dashboard() {
     setToken(v);
     if (typeof window !== "undefined") window.sessionStorage.setItem("atlas_token", v);
   };
-  // Bearer header for state-changing calls (when the agent requires AGENT_API_TOKEN).
   const authHeaders = (): Record<string, string> => (token ? { Authorization: `Bearer ${token}` } : {});
 
   const poll = useCallback(async () => {
     try {
-      const [s, o, d, e, p] = await Promise.all([
+      const [s, o, d, e, p, m, h] = await Promise.all([
         fetch(`${AGENT}/api/state`).then((r) => r.json()),
         fetch(`${AGENT}/api/opportunities`).then((r) => r.json()),
         fetch(`${AGENT}/api/decisions`).then((r) => r.json()),
         fetch(`${AGENT}/api/events?since=${cursor.current}`).then((r) => r.json()),
         fetch(`${AGENT}/api/payments`).then((r) => r.json()),
+        fetch(`${AGENT}/api/metrics`).then((r) => r.json()).catch(() => null),
+        fetch(`${AGENT}/api/health`).then((r) => r.json()).catch(() => null),
       ]);
       setState(s);
       setOpps(o);
@@ -105,6 +187,8 @@ export default function Dashboard() {
       if (e.events.length) setLedger((prev) => [...prev, ...e.events]);
       cursor.current = e.cursor;
       setPayments(p);
+      setMetrics(m);
+      setHealth(h);
       setOffline(false);
     } catch {
       setOffline(true);
@@ -122,79 +206,120 @@ export default function Dashboard() {
     poll();
   };
   const approve = async (a: Approval) => {
-    await fetch(`${AGENT}/api/approve/${a.runId}/${a.opportunityId}`, {
-      method: "POST",
-      headers: authHeaders(),
-    }).catch(() => undefined);
+    await fetch(`${AGENT}/api/approve/${a.runId}/${a.opportunityId}`, { method: "POST", headers: authHeaders() }).catch(
+      () => undefined,
+    );
     poll();
   };
 
-  // Latest decision per opportunity.
   const latest = new Map<string, Decision>();
   for (const d of decisions) latest.set(d.opportunityId, d);
 
   const dataSpend = state?.lastRunDataCostCspr ?? 0;
+  const budget = state?.policy.dataBudgetCspr ?? 1;
+  const treasury = useCountUp(state?.treasuryBalanceCspr ?? 0);
+  const pipe = pipelineState(ledger, state?.running ?? false);
 
   return (
     <div className="shell">
+      {/* ---------------------------------------------------------- masthead */}
       <header className="masthead">
         <div className="wordmark">
           <h1>
             ATLA<em>S</em>
           </h1>
-          <span className="tag">autonomous treasury · spends on data before it spends on yield</span>
+          <span className="tag">autonomous treasury · buys the evidence before it moves the money</span>
         </div>
         <div className="mast-right">
-          {offline && <span className="chip" style={{ borderColor: "var(--rust)", color: "var(--rust)" }}>agent offline — npm run agent</span>}
+          {offline && (
+            <span className="chip alert pulse">
+              <i className="dot" /> agent offline
+            </span>
+          )}
           {state && (
             <>
-              <span className={`chip ${state.mode === "live" ? "live" : "dry"}`}>
-                {state.mode === "live" ? "casper testnet · live" : "dry-run"}
+              <span className={`chip ${state.mode === "live" ? "live" : "dry"} pulse`}>
+                <i className="dot" /> {state.mode === "live" ? "casper testnet · live" : "dry-run"}
               </span>
-              <span className="chip">{state.reasoner ? `${state.reasoner} reasoning` : state.llm ? "llm reasoning" : "deterministic reasoning"}</span>
+              <span className="chip">{state.reasoner ?? (state.llm ? "llm reasoning" : "deterministic")}</span>
             </>
           )}
           <input
-            className="chip"
+            className="token-input"
             type="password"
             placeholder="API token"
             value={token}
             onChange={(e) => saveToken(e.target.value)}
             title="Bearer token for run/approve (set AGENT_API_TOKEN on the agent)"
-            style={{ background: "transparent", width: 96, outline: "none" }}
           />
-          <button className="run-btn" onClick={runAnalysis} disabled={!state || state.running}>
-            {state?.running ? "Agents working…" : "Run analysis"}
+          <button className={`run-btn ${state?.running ? "working" : ""}`} onClick={runAnalysis} disabled={!state || state.running}>
+            {state?.running ? "agents working…" : "run analysis"}
           </button>
         </div>
       </header>
 
-      <main className="grid">
-        {/* ------------------------------------------------ treasury rail */}
-        <aside>
-          <section className="panel">
-            <h2>Treasury</h2>
-            <div className="figure">
-              {state ? cspr(state.treasuryBalanceCspr) : "—"}
-              <small>CSPR</small>
+      {/* ------------------------------------------------------------- hero */}
+      <div className="hero">
+        <section className="vault reveal reveal-1">
+          <span className="label">Treasury under management</span>
+          <div className="figure">
+            {state ? cspr(treasury) : "—"}
+            <span className="unit">CSPR</span>
+          </div>
+          <div className="substats">
+            <div>
+              <span className="n">{state ? cspr(state.spentTodayCspr) : "—"}</span>
+              <span className="l">allocated today</span>
             </div>
-            <div className="rail-row">
-              <span className="k">allocated today</span>
-              <span className="v">{state ? cspr(state.spentTodayCspr) : "—"} CSPR</span>
+            <div>
+              <span className="n">{cspr(dataSpend)}</span>
+              <span className="l">evidence bought (last run)</span>
             </div>
-            <div className="rail-row">
-              <span className="k">data spend (last run)</span>
-              <span className="v">{cspr(dataSpend)} CSPR</span>
+            <div>
+              <span className="n">{metrics?.decisions ?? "—"}</span>
+              <span className="l">decisions on-chain</span>
             </div>
-            <div className="rail-row">
-              <span className="k">runs</span>
-              <span className="v">{state?.runs ?? 0}</span>
+            <div>
+              <span className="n">{state?.runs ?? 0}</span>
+              <span className="l">runs</span>
             </div>
-          </section>
+          </div>
+        </section>
 
-          <section className="panel">
+        <section className="pipeline reveal reveal-2">
+          <div className="phead">
+            <h2>The desk — six agents, one mandate</h2>
+            <span className="live-cost">
+              evidence budget&nbsp; <b>{cspr(dataSpend)}</b> / {cspr(budget)} CSPR
+            </span>
+          </div>
+          <div className="flow">
+            {ROLES.map((r, i) => {
+              const done = (pipe.counts[r.key] ?? 0) > 0;
+              const active = pipe.current === r.key;
+              return (
+                <div
+                  key={r.key}
+                  className={`step ${active ? "active" : done ? "done" : ""}`}
+                  style={{ "--role": ROLE_COLOR[r.key] } as React.CSSProperties}
+                >
+                  <span className="node">{i + 1}</span>
+                  <span className="role">{r.label}</span>
+                  <span className="count">{done ? `${pipe.counts[r.key]} notes` : ""}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+
+      {/* ------------------------------------------------------------- grid */}
+      <main className="grid">
+        {/* left rail */}
+        <aside>
+          <section className="panel reveal reveal-2">
             <h2>Policy — enforced on-chain</h2>
-            {state && (
+            {state ? (
               <>
                 <div className="rail-row">
                   <span className="k">per allocation</span>
@@ -213,59 +338,62 @@ export default function Dashboard() {
                   <span className="v">{Math.round(state.policy.minConfidence * 100)}%</span>
                 </div>
                 <div className="rail-row">
-                  <span className="k">human approval over</span>
+                  <span className="k">human sign-off over</span>
                   <span className="v">{state.policy.approvalThresholdCspr} CSPR</span>
                 </div>
-                <div className="rail-row">
-                  <span className="k">data budget / run</span>
-                  <span className="v">{state.policy.dataBudgetCspr} CSPR</span>
+                <div className="meter" aria-hidden>
+                  <i style={{ width: `${Math.min((dataSpend / budget) * 100, 100)}%` }} />
                 </div>
-                <div className="depleted" aria-hidden>
-                  <i
-                    style={{
-                      width: `${Math.min((dataSpend / state.policy.dataBudgetCspr) * 100, 100)}%`,
-                    }}
-                  />
-                </div>
+                <div className="meter-cap">data budget {cspr(dataSpend)} / {cspr(budget)} CSPR spent</div>
               </>
+            ) : (
+              <div className="empty">connecting…</div>
             )}
           </section>
 
-          <section className="panel">
+          <section className="panel reveal reveal-3">
             <h2>Contracts</h2>
-            <div className="rail-row">
-              <span className="k">TreasuryVault</span>
-              <span className="v">{state?.contracts.vault ? `${state.contracts.vault.slice(0, 10)}…` : "not deployed"}</span>
+            <div className="contract">
+              <span className="cn">TreasuryVault</span>
+              <span className={`cv ${state?.contracts.vault ? "" : "off"}`}>
+                {state?.contracts.vault ? `${state.contracts.vault.slice(0, 22)}…` : "not deployed"}
+              </span>
             </div>
-            <div className="rail-row">
-              <span className="k">DecisionRegistry</span>
-              <span className="v">{state?.contracts.registry ? `${state.contracts.registry.slice(0, 10)}…` : "not deployed"}</span>
+            <div className="contract">
+              <span className="cn">DecisionRegistry</span>
+              <span className={`cv ${state?.contracts.registry ? "" : "off"}`}>
+                {state?.contracts.registry ? `${state.contracts.registry.slice(0, 22)}…` : "not deployed"}
+              </span>
             </div>
           </section>
         </aside>
 
-        {/* ------------------------------------------------- opportunities */}
+        {/* center — opportunities */}
         <section>
           {state && state.pendingApprovals.length > 0 && (
-            <div style={{ marginBottom: 18 }}>
+            <div className="approvals">
               {state.pendingApprovals.map((a) => (
                 <div className="approval" key={`${a.runId}-${a.opportunityId}`}>
                   <div className="what">
-                    Allocate <b>{a.amountCspr} CSPR</b> to {a.opportunityName}? Risk {a.riskScore},
-                    confidence {Math.round(a.confidence * 100)}% — above the auto-execution
-                    threshold.
+                    Allocate <b>{a.amountCspr} CSPR</b> to {a.opportunityName}? Risk {a.riskScore}, confidence{" "}
+                    {Math.round(a.confidence * 100)}% — above the auto-execution threshold.
                   </div>
                   <button className="approve-btn" onClick={() => approve(a)}>
-                    Approve
+                    approve
                   </button>
                 </div>
               ))}
             </div>
           )}
 
-          {opps.length === 0 && <div className="panel empty">Marketplace unreachable — start the data services (npm run services).</div>}
+          <div className="opps-head">
+            <h2>Opportunities</h2>
+            <span className="count">{opps.length} on the desk</span>
+          </div>
 
-          {opps.map((o) => {
+          {opps.length === 0 && <div className="panel empty">Marketplace unreachable — start the data services.</div>}
+
+          {opps.map((o, idx) => {
             const d = latest.get(o.id);
             const cls =
               d?.action === "ALLOCATE"
@@ -278,17 +406,19 @@ export default function Dashboard() {
             const apy = o.advertisedApyBps / 100;
             const risk = d?.riskScore ?? null;
             const riskColor =
-              risk === null ? "var(--faint)" : risk > 60 ? "var(--rust)" : risk > 35 ? "var(--brass)" : "var(--mint)";
+              risk === null ? "var(--faint)" : risk > 60 ? "var(--coral)" : risk > 35 ? "var(--copper)" : "var(--jade)";
             return (
-              <article className={`opp ${cls}`} key={o.id}>
+              <article className={`opp ${cls}`} key={o.id} style={{ animationDelay: `${Math.min(idx * 60, 360)}ms` }}>
                 <div className="opp-head">
                   <div>
                     <span className="cat">{o.category}</span>
                     <h3>{o.name}</h3>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div className="right">
                     <span className={`apy ${apy > 30 ? "absurd" : ""}`}>
-                      advertised <b>{apy.toFixed(1)}%</b> APY
+                      advertised
+                      <br />
+                      <b>{apy.toFixed(1)}%</b> APY
                     </span>
                     {d && <span className={`action ${d.action}`}>{d.action.replaceAll("_", " ")}</span>}
                   </div>
@@ -307,12 +437,18 @@ export default function Dashboard() {
                   <p className="bought">
                     {d.dataSources.length > 0 ? (
                       <>
-                        evidence bought via x402: {d.dataSources.join(" + ")} · <b>{cspr(d.dataCostCspr)} CSPR</b>
+                        <span className="x402">x402</span>
+                        evidence: {d.dataSources.join(" + ")} · <b>{cspr(d.dataCostCspr)} CSPR</b>
                       </>
                     ) : (
                       "no data purchased for this opportunity"
                     )}
-                    {d.action === "ALLOCATE" && <> — allocated <b>{d.amountCspr} CSPR</b></>}
+                    {d.action === "ALLOCATE" && (
+                      <>
+                        {" "}
+                        — allocated <b>{d.amountCspr} CSPR</b>
+                      </>
+                    )}
                   </p>
                 )}
               </article>
@@ -320,12 +456,14 @@ export default function Dashboard() {
           })}
         </section>
 
-        {/* ------------------------------------------------------- ledger */}
+        {/* right — ledger + settlements */}
         <aside>
-          <section className="panel">
+          <section className="panel reveal reveal-3">
             <h2>Decision ledger — every step, posted</h2>
             <div className="ledger">
-              {ledger.length === 0 && <div className="empty">No entries yet. Run an analysis to watch the agents post their work.</div>}
+              {ledger.length === 0 && (
+                <div className="empty">No entries yet. Run an analysis to watch the desk post its work.</div>
+              )}
               {[...ledger].reverse().map((e, i) => (
                 <div className="entry" key={`${e.ts}-${i}`}>
                   <time>{e.ts.slice(11, 19)}</time>
@@ -338,7 +476,7 @@ export default function Dashboard() {
             </div>
           </section>
 
-          <section className="panel">
+          <section className="panel reveal reveal-4">
             <h2>x402 settlements</h2>
             {payments.length === 0 && <div className="empty">No payments yet.</div>}
             {payments
@@ -347,17 +485,45 @@ export default function Dashboard() {
               .map((p, i) => (
                 <div className="pay" key={i}>
                   <span className="amt">{p.amount ? cspr(Number(BigInt(p.amount)) / 1e9) : "?"} CSPR</span>
-                  <span>{p.resource?.replace("/api/", "")}</span>
-                  <span className="tx">{p.settlement?.transaction ?? p.settlement?.mode}</span>
+                  <span className="res">{p.resource?.replace("/api/", "") ?? "—"}</span>
+                  <span className={`tx ${p.settlement?.transaction ? "settled" : ""}`}>
+                    {p.settlement?.transaction ? `${p.settlement.transaction.slice(0, 10)}…` : p.settlement?.mode}
+                  </span>
                 </div>
               ))}
           </section>
         </aside>
       </main>
 
+      {/* ----------------------------------------------------------- system */}
+      {(health || metrics) && (
+        <section className="panel reveal" style={{ marginTop: 22 }}>
+          <h2>System</h2>
+          <div className="health">
+            <div className="h">
+              <span className="dot up" /> agent · up {fmtDur(health?.uptimeSec ?? metrics?.uptimeSec)}
+            </div>
+            <div className="h">
+              <span className={`dot ${health?.deps.services ? "up" : "down"}`} /> data services ·{" "}
+              {health?.deps.services ? "reachable" : "unreachable"}
+            </div>
+            <div className="h">decisions posted · {metrics?.decisions ?? 0}</div>
+            <div className="h">reasoner · {metrics?.reasoner ?? (state?.llm ? "llm" : "deterministic")}</div>
+            {(health?.lastError ?? metrics?.lastError) && (
+              <div className="h" style={{ color: "var(--coral)" }}>
+                <span className="dot down" /> last error · {(health?.lastError ?? metrics?.lastError)?.message}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       <footer className="foot">
-        <span>Atlas Agent — Casper Agentic Buildathon 2026. Contracts in Odra; data paid for over x402; decisions recorded on the Casper DecisionRegistry.</span>
-        <span>{state?.network ?? "casper-test"}</span>
+        <span>
+          Atlas Agent — Casper Agentic Buildathon 2026. Contracts in Odra; evidence paid over x402; every decision
+          recorded on the Casper DecisionRegistry.
+        </span>
+        <span className="mono">{state?.network ?? "casper-test"}</span>
       </footer>
     </div>
   );
