@@ -36,8 +36,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: wasm tooling (wasm-strip, wasm-opt)
+      - name: wasm tooling (wabt + binaryen base)
         run: sudo apt-get update && sudo apt-get install -y wabt binaryen
+      - name: modern binaryen for signext-lowering (best-effort)
+        run: |
+          VER=version_119
+          if curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/$VER/binaryen-$VER-x86_64-linux.tar.gz" | tar xz; then
+            echo "$PWD/binaryen-$VER/bin" >> "$GITHUB_PATH"
+            echo "using binaryen $VER (supports --signext-lowering)"
+          else
+            echo "binaryen $VER download failed; using apt binaryen (build-wasm.sh falls back to -Oz only)"
+          fi
       - name: rust toolchain (pinned nightly + wasm32)
         uses: dtolnay/rust-toolchain@master
         with:

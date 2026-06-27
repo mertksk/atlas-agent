@@ -19,8 +19,15 @@ build_one() {
   cp "$TARGET" "$out"
   wasm-strip "$out"
   # Casper's wasm engine rejects sign-extension opcodes that modern rustc emits;
-  # lower them to MVP instructions, and -Oz to shrink install gas cost.
-  wasm-opt -Oz --signext-lowering "$out" -o "$out"
+  # lower them to MVP instructions (binaryen >= 116), and -Oz to shrink install
+  # gas cost. Older binaryen lacks the flag — fall back to -Oz only so the build
+  # still completes (deploy artifacts MUST use a binaryen that supports it).
+  if wasm-opt --help 2>&1 | grep -q -- '--signext-lowering'; then
+    wasm-opt -Oz --signext-lowering "$out" -o "$out"
+  else
+    echo "    WARN: wasm-opt lacks --signext-lowering — running -Oz only (NOT deploy-ready)." >&2
+    wasm-opt -Oz "$out" -o "$out"
+  fi
   echo "    $(wc -c < "$out") bytes  $(shasum -a256 "$out" | cut -d' ' -f1)"
 }
 
