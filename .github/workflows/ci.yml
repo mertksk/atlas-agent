@@ -14,13 +14,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: install (workspaces: services + agent)
+      - name: install workspaces (services + agent)
         run: npm ci
       - name: typecheck
         run: npm run typecheck
       - name: unit tests
         run: npm test
-      - name: e2e (offline: mock x402 + dry-run pipeline)
+      - name: e2e (offline mock x402 + dry-run pipeline)
         run: npm run test:e2e
       - name: resilience (dependency-outage degradation)
         run: npm run test:resilience
