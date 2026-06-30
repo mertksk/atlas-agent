@@ -15,6 +15,7 @@
 import express from "express";
 import { getLiquidity, getMarketSignal, getRisk, getRwaDoc, OPPORTUNITIES } from "./data.js";
 import * as llama from "./defillama.js";
+import * as marketSignal from "./marketsignal.js";
 import { paid, paymentLedger } from "./x402.js";
 
 // DATA_SOURCE=defillama → real protocol pools from yields.llama.fi (free).
@@ -72,8 +73,8 @@ app.get("/api/rwa-doc", paid(price(0.8), "RWA legal document analysis and disclo
   res.json(data);
 });
 
-app.get("/api/market-signal", paid(price(0.4), "Market sentiment, volatility and news-risk summary"), (_req, res) => {
-  res.json(getMarketSignal());
+app.get("/api/market-signal", paid(price(0.4), "Market sentiment, volatility and news-risk summary"), async (_req, res) => {
+  res.json(USE_LLAMA ? await marketSignal.get() : getMarketSignal());
 });
 
 app.get("/payments", (_req, res) => {
