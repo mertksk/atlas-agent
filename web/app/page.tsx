@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Onboarding from "./Onboarding";
+import { downloadReport } from "./report";
 
 const AGENT = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:4030";
 
@@ -246,6 +247,14 @@ export default function Dashboard() {
               <span className="chip">{state.reasoner ?? (state.llm ? "llm reasoning" : "deterministic")}</span>
             </>
           )}
+          <button
+            className="report-btn"
+            onClick={() => downloadReport({ state, opps, decisions, payments, ledger }).catch(() => undefined)}
+            disabled={!state}
+            title="Download an .xlsx report: decisions, evidence bought, x402 settlements, ledger"
+          >
+            ⤓ report
+          </button>
           <input
             className="token-input"
             type="password"
