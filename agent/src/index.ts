@@ -193,6 +193,9 @@ async function executeRun(): Promise<RunResult> {
       }
       if (d.verdict.finalAction === "QUEUE_FOR_APPROVAL") {
         const opp = opps.find((o) => o.id === d.decision.opportunityId);
+        // Keep only the latest pending approval per opportunity — re-running
+        // shouldn't pile up duplicates for the same opportunity.
+        store.pendingApprovals = store.pendingApprovals.filter((a) => a.opportunityId !== d.decision.opportunityId);
         store.pendingApprovals.push({
           runId: result.runId,
           opportunityId: d.decision.opportunityId,
