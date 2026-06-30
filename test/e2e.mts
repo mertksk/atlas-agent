@@ -46,7 +46,7 @@ function check(cond: boolean, msg: string) {
 
 try {
   rmSync(STATE_PATH, { force: true });
-  start("services", ["run", "start", "-w", "services"], { SERVICES_PORT: String(SERVICES_PORT), CORS_ORIGIN: "*", FACILITATOR_URL: "" });
+  start("services", ["run", "start", "-w", "services"], { SERVICES_PORT: String(SERVICES_PORT), CORS_ORIGIN: "*", FACILITATOR_URL: "", DATA_SOURCE: "mock" });
   start("agent", ["run", "serve", "-w", "agent"], {
     AGENT_PORT: String(AGENT_PORT), SERVICES_URL: `http://localhost:${SERVICES_PORT}`,
     DRY_RUN: "true", AGENT_API_TOKEN: TOKEN, STATE_PATH, TREASURY_BALANCE_CSPR: "100",
