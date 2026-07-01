@@ -19,14 +19,18 @@
 //!   cargo run --bin atlas_livenet --features livenet -- execute-allocation \
 //!       <vault_addr> <opportunity_id> <amount_motes> <recipient> <risk_score> <confidence_bps>
 //!   cargo run --bin atlas_livenet --features livenet -- vault-status <vault_addr>
+//!   cargo run --bin atlas_livenet --features livenet -- swap-cspr \
+//!       <router_addr> <wcspr_addr> <token_out_addr> <amount_motes> <to_addr> <min_out>
+//!       (real CSPR->token swap on the cspr.trade Uniswap-V2 DEX)
 
 use std::str::FromStr;
 
 use atlas_contracts::decision_registry::{DecisionRegistry, DecisionRegistryHostRef};
 use atlas_contracts::treasury_vault::{TreasuryVault, TreasuryVaultHostRef, TreasuryVaultInitArgs};
-use odra::casper_types::U512;
+use odra::casper_types::{runtime_args, U256, U512};
 use odra::host::{Deployer, HostRef, HostRefLoader, NoArgs};
 use odra::prelude::*; // Address + Addressable (.address())
+use odra::CallDef; // low-level call to an external (cspr.trade) contract
 
 const CSPR: u64 = 1_000_000_000;
 
@@ -141,6 +145,44 @@ fn main() {
                 p.approval_threshold
             );
         }
+        Some("swap-cspr") => {
+            // Real on-chain swap of CSPR -> token_out on the cspr.trade DEX (Odra
+            // Uniswap-V2 router). The CSPR to swap is attached via `.with_amount`;
+            // the router wraps it to WCSPR and swaps along path [WCSPR, token_out].
+            // min_out (in token_out base units) is computed off-chain by the caller
+            // for slippage protection.
+            //   swap-cspr <router> <wcspr> <token_out> <amount_motes> <to> <min_out>
+            let router = addr(arg(&args, 1, "router_addr"));
+            let wcspr = addr(arg(&args, 2, "wcspr_addr"));
+            let token_out = addr(arg(&args, 3, "token_out_addr"));
+            let amount = motes(arg(&args, 4, "amount_motes")); // U512, attached CSPR
+            let to = addr(arg(&args, 5, "to_addr"));
+            let min_out = u256(arg(&args, 6, "min_out"));
+            let path: Vec<Address> = vec![wcspr, token_out];
+
+            env.set_gas(40 * CSPR);
+            let call = CallDef::new(
+                "swap_exact_cspr_for_tokens",
+                true,
+                runtime_args! {
+                    "amount_out_min" => min_out,
+                    "path" => path,
+                    "to" => to,
+                    "deadline" => u64::MAX,
+                },
+            )
+            .with_amount(amount);
+            match env.call_contract::<()>(router, call) {
+                Ok(_) => println!(
+                    "{{\"ok\":true,\"swapped\":\"{}\",\"minOut\":\"{}\"}}",
+                    amount, min_out
+                ),
+                Err(e) => {
+                    eprintln!("swap failed: {:?}", e);
+                    std::process::exit(3);
+                }
+            }
+        }
         _ => {
             eprintln!("unknown command. see file header for usage.");
             std::process::exit(2);
@@ -170,6 +212,13 @@ fn u32_arg(args: &[String], i: usize, name: &str) -> u32 {
 fn motes(s: &str) -> U512 {
     U512::from_dec_str(s).unwrap_or_else(|_| {
         eprintln!("amount must be an integer number of motes, got \"{}\"", s);
+        std::process::exit(2);
+    })
+}
+
+fn u256(s: &str) -> U256 {
+    U256::from_dec_str(s).unwrap_or_else(|_| {
+        eprintln!("expected an unsigned integer, got \"{}\"", s);
         std::process::exit(2);
     })
 }
