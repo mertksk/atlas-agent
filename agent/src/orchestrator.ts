@@ -17,7 +17,7 @@ import { config, defaultPolicy } from "./config.js";
 import { X402Client, PriceAboveBudgetError } from "./x402Client.js";
 import { guard } from "./policyGuard.js";
 import { decide } from "./reasoning.js";
-import { recordDecisionOnChain, executeAllocationOnChain, vaultStatus } from "./chain.js";
+import { recordDecisionOnChain, executeAllocationOnChain, swapCsprForWusdc, vaultStatus } from "./chain.js";
 import {
   csprToMotes,
   motesToCspr,
@@ -292,13 +292,18 @@ export async function runPipeline(opts: OrchestratorOptions = {}): Promise<RunRe
     );
 
     if (verdict.finalAction === "ALLOCATE" && finalAmount > 0) {
-      const exec = await executeAllocationOnChain({
-        opportunityId: o.id,
-        amountCspr: finalAmount,
-        recipient: o.strategyAddress,
-        riskScore: decision.riskScore,
-        confidence: decision.confidence,
-      });
+      // With cspr.trade enabled, executing an allocation performs a REAL on-chain
+      // CSPR->WUSDC swap on the DEX; otherwise it's the vault's policy-enforced
+      // transfer to the strategy recipient.
+      const exec = config.csprTradeEnabled
+        ? await swapCsprForWusdc(finalAmount)
+        : await executeAllocationOnChain({
+            opportunityId: o.id,
+            amountCspr: finalAmount,
+            recipient: o.strategyAddress,
+            riskScore: decision.riskScore,
+            confidence: decision.confidence,
+          });
       if (exec.executed || exec.dryRun) {
         spentTodayCspr += finalAmount;
         treasuryBalanceCspr -= finalAmount;
@@ -308,7 +313,9 @@ export async function runPipeline(opts: OrchestratorOptions = {}): Promise<RunRe
         exec.dryRun
           ? `${o.id}: would allocate ${finalAmount} CSPR to ${o.strategyAddress.slice(0, 16)}… (dry-run).`
           : exec.executed
-            ? `${o.id}: allocated ${finalAmount} CSPR via TreasuryVault.execute_allocation.`
+            ? config.csprTradeEnabled
+              ? `${o.id}: swapped ${finalAmount} CSPR → WUSDC on cspr.trade (real DEX execution).`
+              : `${o.id}: allocated ${finalAmount} CSPR via TreasuryVault.execute_allocation.`
             : `${o.id}: allocation failed on-chain: ${exec.error}`,
       );
       onChain.executed = exec.executed;

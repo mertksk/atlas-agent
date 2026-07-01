@@ -49,6 +49,20 @@ export const config = {
   // Unset => approvals of >= the approval threshold cannot succeed (the agent key
   // would be rejected on-chain). Sub-threshold auto-allocations still work.
   ownerSecretKeyPath: process.env.OWNER_SECRET_KEY_PATH,
+  // cspr.trade (Casper-testnet Uniswap-V2 DEX) — when enabled, a live ALLOCATE
+  // performs a REAL on-chain CSPR->WUSDC swap on the DEX (via the livenet
+  // `swap-cspr` command) instead of only recording the decision. Addresses are
+  // the verified testnet package hashes; see memory cspr-trade-testnet-contracts.
+  csprTradeEnabled: (process.env.CSPRTRADE_ENABLED ?? "false").toLowerCase() === "true",
+  csprTradeRouter: process.env.CSPRTRADE_ROUTER ?? "hash-04a11a367e708c52557930c4e9c1301f4465100d1b1b6d0a62b48d3e32402867",
+  csprTradeWcspr: process.env.CSPRTRADE_WCSPR ?? "hash-3d80df21ba4ee4d66a2a1f60c32570dd5685e4b279f6538162a5fd1314847c1e",
+  csprTradeWusdc: process.env.CSPRTRADE_WUSDC ?? "hash-073024d1112dd970cc75b797952a70f71efe3a8a69af152e8fbe8ef434823396",
+  // WUSDC/WCSPR pool package hash (read reserves off-chain to size min_out).
+  csprTradePool: process.env.CSPRTRADE_POOL ?? "8747a781dab337b8014a66865355648223c05439684e62f90c1dbe18e4ed7c3a",
+  csprTradeSlippageBps: Number(process.env.CSPRTRADE_SLIPPAGE_BPS ?? 200), // 2%
+  csprTradeMaxSwapCspr: Number(process.env.CSPRTRADE_MAX_SWAP_CSPR ?? 25), // per-swap safety cap
+  // Where swapped WUSDC lands (an account-hash-... the agent controls).
+  csprTradeRecipient: process.env.CSPRTRADE_RECIPIENT ?? "account-hash-14d0146936dae21bf0cc77c385b7d725cb9101462d1dc16c8dc3f405c62c2917",
   // Bearer token guarding the state-changing API endpoints (run, approve).
   // Unset => those endpoints are unauthenticated (dev only).
   apiToken: process.env.AGENT_API_TOKEN,

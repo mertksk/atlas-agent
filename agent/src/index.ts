@@ -25,7 +25,7 @@ import { timingSafeEqual } from "node:crypto";
 import { config, defaultPolicy, validateConfig, ConfigError } from "./config.js";
 import { runPipeline } from "./orchestrator.js";
 import { reasonerLabel } from "./reasoning.js";
-import { executeAllocationOnChain, recordDecisionOnChain, vaultStatus, type OnChainOutcome } from "./chain.js";
+import { executeAllocationOnChain, recordDecisionOnChain, swapCsprForWusdc, vaultStatus, type OnChainOutcome } from "./chain.js";
 import { motesToCspr, type LedgerEntry, type RunResult } from "./types.js";
 
 interface PendingApproval {
@@ -427,16 +427,20 @@ app.post("/api/approve/:runId/:oppId", requireAuth, async (req, res) => {
   // amounts >= the on-chain approval threshold).
   let exec: OnChainOutcome;
   try {
-    exec = await executeAllocationOnChain(
-      {
-        opportunityId: approval.opportunityId,
-        amountCspr: approval.amountCspr,
-        recipient: approval.recipient,
-        riskScore: approval.riskScore,
-        confidence: approval.confidence,
-      },
-      { asOwner: true },
-    );
+    // cspr.trade enabled => the approved allocation is executed as a REAL
+    // CSPR->WUSDC swap on the DEX; otherwise the owner-signed vault transfer.
+    exec = config.csprTradeEnabled
+      ? await swapCsprForWusdc(approval.amountCspr)
+      : await executeAllocationOnChain(
+          {
+            opportunityId: approval.opportunityId,
+            amountCspr: approval.amountCspr,
+            recipient: approval.recipient,
+            riskScore: approval.riskScore,
+            confidence: approval.confidence,
+          },
+          { asOwner: true },
+        );
   } catch (err) {
     recordError(`approval execution threw: ${String(err)}`);
     store.pendingApprovals.push(approval);
@@ -476,7 +480,9 @@ app.post("/api/approve/:runId/:oppId", requireAuth, async (req, res) => {
   store.ledger.push({
     ts: new Date().toISOString(),
     agent: "executor",
-    message: `${approval.opportunityId}: human approved — ${approval.amountCspr} CSPR allocated${exec.dryRun ? " (dry-run)" : " on Casper Testnet"}.`,
+    message: `${approval.opportunityId}: human approved — ${approval.amountCspr} CSPR ${
+      config.csprTradeEnabled ? "swapped → WUSDC on cspr.trade" : "allocated"
+    }${exec.dryRun ? " (dry-run)" : " on Casper Testnet"}.`,
   });
   await refreshTreasuryFromChain();
   flushState();

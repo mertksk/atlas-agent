@@ -110,6 +110,60 @@ export async function executeAllocationOnChain(
   }
 }
 
+const CSPR_LIVE_API = "https://api.testnet.cspr.live";
+
+/** Read live WCSPR/WUSDC pool reserves (base units) to size a swap's min_out off-chain. */
+async function poolReserves(poolHash: string): Promise<{ wcspr: bigint; wusdc: bigint }> {
+  const r = await fetch(`${CSPR_LIVE_API}/accounts/${poolHash}/ft-token-ownership?page=1&limit=10`, {
+    headers: { "User-Agent": "atlas-agent" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!r.ok) throw new Error(`pool reserves HTTP ${r.status}`);
+  const j = (await r.json()) as { data?: Array<{ balance?: string; contract_package?: { metadata?: { symbol?: string } } }> };
+  const res: Record<string, bigint> = {};
+  for (const t of j.data ?? []) {
+    const sym = t.contract_package?.metadata?.symbol;
+    if (sym) res[sym] = BigInt(t.balance ?? "0");
+  }
+  if (!res.WCSPR || !res.WUSDC) throw new Error("WCSPR/WUSDC reserves unavailable");
+  return { wcspr: res.WCSPR, wusdc: res.WUSDC };
+}
+
+/**
+ * Execute a REAL CSPR->WUSDC swap on the cspr.trade DEX (the agent key signs;
+ * WUSDC lands in config.csprTradeRecipient). min_out is sized from live reserves
+ * with the configured slippage. Guarded by CSPRTRADE_MAX_SWAP_CSPR.
+ */
+export async function swapCsprForWusdc(
+  amountCspr: number,
+): Promise<OnChainOutcome & { minOut?: string; expectedOut?: string; txAmountMotes?: string }> {
+  if (config.dryRun) return { recorded: false, executed: false, dryRun: true };
+  if (!(amountCspr > 0)) return { recorded: false, executed: false, dryRun: false, error: "swap amount must be > 0" };
+  if (amountCspr > config.csprTradeMaxSwapCspr) {
+    return { recorded: false, executed: false, dryRun: false, error: `swap ${amountCspr} CSPR exceeds CSPRTRADE_MAX_SWAP_CSPR=${config.csprTradeMaxSwapCspr}` };
+  }
+  try {
+    const { wcspr, wusdc } = await poolReserves(config.csprTradePool);
+    const amountIn = BigInt(csprToMotes(amountCspr)); // WCSPR base == motes (9 dp)
+    // Uniswap-V2 getAmountOut with the 0.3% fee.
+    const expectedOut = (amountIn * 997n * wusdc) / (wcspr * 1000n + amountIn * 997n);
+    const minOut = (expectedOut * BigInt(10_000 - config.csprTradeSlippageBps)) / 10_000n;
+    if (minOut <= 0n) throw new Error("computed min_out is 0 (amount too small for current reserves)");
+    await livenet([
+      "swap-cspr",
+      config.csprTradeRouter,
+      config.csprTradeWcspr,
+      config.csprTradeWusdc,
+      amountIn.toString(),
+      config.csprTradeRecipient,
+      minOut.toString(),
+    ]);
+    return { recorded: false, executed: true, dryRun: false, minOut: minOut.toString(), expectedOut: expectedOut.toString(), txAmountMotes: amountIn.toString() };
+  } catch (err) {
+    return { recorded: false, executed: false, dryRun: false, error: String(err) };
+  }
+}
+
 export async function vaultStatus(): Promise<unknown | null> {
   if (config.dryRun || !config.vaultAddress) return null;
   try {
