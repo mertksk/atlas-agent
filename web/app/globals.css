@@ -160,6 +160,14 @@ button { font: inherit; }
 .chip.pulse .dot { animation: blink 1.4s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: 0.25; } }
 
+.chip.authed { border-color: rgba(95, 207, 159, 0.4); color: var(--jade); }
+.chip-link {
+  background: none; border: none; color: var(--faint); font: inherit; font-size: 10px;
+  letter-spacing: 0.06em; cursor: pointer; padding: 0 0 0 4px; text-decoration: underline dotted;
+  text-underline-offset: 2px; transition: color 140ms;
+}
+.chip-link:hover { color: var(--jade); }
+
 .report-btn {
   font-family: var(--font-mono);
   font-size: 11px;

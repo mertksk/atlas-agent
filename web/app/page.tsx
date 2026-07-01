@@ -162,6 +162,7 @@ export default function Dashboard() {
   const [health, setHealth] = useState<Health | null>(null);
   const [offline, setOffline] = useState(false);
   const [token, setToken] = useState("");
+  const [editingToken, setEditingToken] = useState(false);
   const cursor = useRef(0);
 
   // Local demo convenience: if NEXT_PUBLIC_AGENT_API_TOKEN is provided (local/dev
@@ -262,14 +263,25 @@ export default function Dashboard() {
           >
             ⤓ report
           </button>
-          <input
-            className="token-input"
-            type="password"
-            placeholder="API token"
-            value={token}
-            onChange={(e) => saveToken(e.target.value)}
-            title="Bearer token for run/approve (set AGENT_API_TOKEN on the agent)"
-          />
+          {token && !editingToken ? (
+            <span className="chip authed" title="Authorized to run analysis and approve allocations">
+              <i className="dot" /> authorized
+              <button className="chip-link" onClick={() => setEditingToken(true)} title="Change API token">
+                change
+              </button>
+            </span>
+          ) : (
+            <input
+              className="token-input"
+              type="password"
+              placeholder="API token"
+              value={token}
+              autoFocus={editingToken}
+              onChange={(e) => saveToken(e.target.value)}
+              onBlur={() => setEditingToken(false)}
+              title="Bearer token for run/approve (set AGENT_API_TOKEN on the agent)"
+            />
+          )}
           <button className={`run-btn ${state?.running ? "working" : ""}`} onClick={runAnalysis} disabled={!state || state.running}>
             {state?.running ? "agents working…" : "run analysis"}
           </button>
