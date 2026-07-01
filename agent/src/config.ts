@@ -70,8 +70,11 @@ export const config = {
   x402Wusdc: process.env.X402_WUSDC ?? "hash-073024d1112dd970cc75b797952a70f71efe3a8a69af152e8fbe8ef434823396",
   // Per-data-item WUSDC price in base units (6 dp) when X402_ASSET=wusdc.
   x402WusdcPriceBase: process.env.X402_WUSDC_PRICE_BASE ?? "1000", // 0.001 WUSDC
-  // Where x402 WUSDC payments go (the data provider / payee account).
-  x402Payee: process.env.X402_PAYEE ?? "account-hash-a54a5bcda6707361564fab8dc3bff790133c4e1fc8caf2bf2219e49593aa1ec4",
+  // Where x402 WUSDC payments go. MUST be a casper Address (account-hash-… or
+  // hash-…) the CEP-18 `transfer` accepts — NOT the facilitator's "00"+hex
+  // X402_PAYEE format. Defaults to the owner/deployer account.
+  x402WusdcPayee:
+    process.env.X402_WUSDC_PAYEE ?? "account-hash-a54a5bcda6707361564fab8dc3bff790133c4e1fc8caf2bf2219e49593aa1ec4",
   // Bearer token guarding the state-changing API endpoints (run, approve).
   // Unset => those endpoints are unauthenticated (dev only).
   apiToken: process.env.AGENT_API_TOKEN,

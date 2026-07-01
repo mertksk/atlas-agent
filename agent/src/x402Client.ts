@@ -173,14 +173,16 @@ export class X402Client {
     // Real-stablecoin mode: pay the data provider with an on-chain WUSDC transfer
     // (a recognized cspr.trade testnet token) and present the tx as the receipt.
     if (config.x402Asset === "wusdc") {
-      const payTo = req.payTo ?? config.x402Payee;
+      // Use the configured casper-address payee (the services' payTo is the
+      // facilitator's "00"+hex format, which CEP-18 transfer can't parse).
+      const payTo = config.x402WusdcPayee;
       const pay = await payWusdc(payTo, config.x402WusdcPriceBase);
       if (!pay.ok) throw new Error(`WUSDC x402 payment failed: ${pay.error}`);
       const proof = {
         x402Version: 2,
         scheme: "casper-cep18",
         asset: "wusdc",
-        from: config.x402Payee,
+        from: config.csprTradeRecipient, // the payer (agent) account
         to: payTo,
         amount: config.x402WusdcPriceBase,
         tx: pay.txHash,
