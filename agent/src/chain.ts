@@ -164,6 +164,33 @@ export async function swapCsprForWusdc(
   }
 }
 
+/** Like livenet() but also returns the Casper tx hash the livenet logger prints to stderr. */
+async function livenetWithTx(args: string[]): Promise<{ stdout: string; txHash?: string }> {
+  const [cmd, ...base] = config.livenetCmd.split(" ");
+  const { stdout, stderr } = await exec(cmd, [...base, ...args], { timeout: 240_000, env: process.env });
+  const m = /Transaction "([0-9a-f]{64})"/i.exec(stderr) ?? /Transaction "([0-9a-f]{64})"/i.exec(stdout);
+  return { stdout: stdout.trim(), txHash: m?.[1] };
+}
+
+/**
+ * Pay a data provider in REAL WUSDC via an on-chain CEP-18 transfer — the x402
+ * settlement asset when X402_ASSET=wusdc (a recognized cspr.trade testnet
+ * stablecoin) instead of the self-issued demo EIP-3009 token. The signer (payer)
+ * must hold >= the amount of WUSDC. Returns the settlement tx hash.
+ */
+export async function payWusdc(
+  payTo: string,
+  amountBaseUnits: string,
+): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+  if (config.dryRun) return { ok: true };
+  try {
+    const { txHash } = await livenetWithTx(["cep18-transfer", config.x402Wusdc, payTo, amountBaseUnits]);
+    return { ok: true, txHash };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 export async function vaultStatus(): Promise<unknown | null> {
   if (config.dryRun || !config.vaultAddress) return null;
   try {

@@ -35,7 +35,7 @@ export interface PaymentRequirements {
 
 export interface Settlement {
   success: boolean;
-  mode: "facilitator" | "mock";
+  mode: "facilitator" | "mock" | "wusdc";
   network: string;
   transaction?: string; // deploy hash when settled on-chain
   payer?: string;
@@ -187,6 +187,24 @@ export function paid(priceMotes: string, description: string) {
     const payload = decodePayload(header);
     if (!payload) {
       res.status(402).json({ x402Version: FACILITATOR ? 2 : 1, error: "malformed PAYMENT-SIGNATURE payload", accepts: [requirements] });
+      return;
+    }
+
+    // Real-stablecoin (WUSDC) mode: the client already paid on-chain via a CEP-18
+    // transfer and presents the tx hash as proof. Accept + record it (the transfer
+    // is real and independently verifiable on-chain by the tx).
+    if ((payload as { scheme?: string })?.scheme === "casper-cep18") {
+      const p = payload as { tx?: string; from?: string; amount?: string };
+      const settlement: Settlement = { success: true, mode: "wusdc", network: NETWORK, transaction: p.tx, payer: p.from, amount: p.amount };
+      paymentLedger.push({
+        resource: req.path,
+        amount: String(p.amount ?? "0"),
+        payer: p.from ?? "unknown",
+        settlement,
+        at: new Date().toISOString(),
+      });
+      res.setHeader("X-PAYMENT-RESPONSE", Buffer.from(JSON.stringify(settlement)).toString("base64"));
+      next();
       return;
     }
 

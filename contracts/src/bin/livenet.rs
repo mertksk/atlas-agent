@@ -183,6 +183,31 @@ fn main() {
                 }
             }
         }
+        Some("cep18-transfer") => {
+            // Real on-chain CEP-18 transfer — used to pay for x402 data in a real
+            // token (e.g. cspr.trade WUSDC) instead of the demo EIP-3009 token.
+            // The signer (payer) must hold >= amount of the token.
+            //   cep18-transfer <token_addr> <to_addr> <amount_base_units>
+            let token = addr(arg(&args, 1, "token_addr"));
+            let to = addr(arg(&args, 2, "to_addr"));
+            let amount = u256(arg(&args, 3, "amount"));
+            env.set_gas(5 * CSPR);
+            let call = CallDef::new(
+                "transfer",
+                true,
+                runtime_args! {
+                    "recipient" => to,
+                    "amount" => amount,
+                },
+            );
+            match env.call_contract::<()>(token, call) {
+                Ok(_) => println!("{{\"ok\":true,\"amount\":\"{}\"}}", amount),
+                Err(e) => {
+                    eprintln!("cep18-transfer failed: {:?}", e);
+                    std::process::exit(3);
+                }
+            }
+        }
         _ => {
             eprintln!("unknown command. see file header for usage.");
             std::process::exit(2);

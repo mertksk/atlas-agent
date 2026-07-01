@@ -14,7 +14,7 @@ export interface PurchasedData {
   source: "risk-score" | "liquidity" | "rwa-doc" | "market-signal";
   costMotes: string;
   settlementTx?: string;
-  settlementMode?: "facilitator" | "mock";
+  settlementMode?: "facilitator" | "mock" | "wusdc";
   payload: unknown;
 }
 

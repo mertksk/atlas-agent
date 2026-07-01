@@ -63,6 +63,15 @@ export const config = {
   csprTradeMaxSwapCspr: Number(process.env.CSPRTRADE_MAX_SWAP_CSPR ?? 25), // per-swap safety cap
   // Where swapped WUSDC lands (an account-hash-... the agent controls).
   csprTradeRecipient: process.env.CSPRTRADE_RECIPIENT ?? "account-hash-14d0146936dae21bf0cc77c385b7d725cb9101462d1dc16c8dc3f405c62c2917",
+  // x402 settlement asset. "wusdc" => pay for data with a REAL on-chain WUSDC
+  // transfer (a recognized cspr.trade testnet stablecoin, 6-decimal); anything
+  // else keeps the demo EIP-3009 token / facilitator path. See chain.payWusdc.
+  x402Asset: (process.env.X402_ASSET ?? "demo").toLowerCase(),
+  x402Wusdc: process.env.X402_WUSDC ?? "hash-073024d1112dd970cc75b797952a70f71efe3a8a69af152e8fbe8ef434823396",
+  // Per-data-item WUSDC price in base units (6 dp) when X402_ASSET=wusdc.
+  x402WusdcPriceBase: process.env.X402_WUSDC_PRICE_BASE ?? "1000", // 0.001 WUSDC
+  // Where x402 WUSDC payments go (the data provider / payee account).
+  x402Payee: process.env.X402_PAYEE ?? "account-hash-a54a5bcda6707361564fab8dc3bff790133c4e1fc8caf2bf2219e49593aa1ec4",
   // Bearer token guarding the state-changing API endpoints (run, approve).
   // Unset => those endpoints are unauthenticated (dev only).
   apiToken: process.env.AGENT_API_TOKEN,

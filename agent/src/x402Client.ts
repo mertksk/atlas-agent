@@ -16,6 +16,7 @@
  */
 import nacl from "tweetnacl";
 import { config } from "./config.js";
+import { payWusdc } from "./chain.js";
 
 export interface Signer {
   publicKeyHex(): string;
@@ -50,7 +51,7 @@ export interface PaidResponse<T> {
   paid: boolean;
   amountMotes: string;
   settlementTx?: string;
-  settlementMode?: "facilitator" | "mock";
+  settlementMode?: "facilitator" | "mock" | "wusdc";
 }
 
 function authorizationBytes(auth: Record<string, unknown>): Uint8Array {
@@ -168,6 +169,34 @@ export class X402Client {
     const priceStr = req.amount ?? req.maxAmountRequired ?? "0";
     const amount = BigInt(priceStr);
     if (amount > maxMotes) throw new PriceAboveBudgetError(url, priceStr);
+
+    // Real-stablecoin mode: pay the data provider with an on-chain WUSDC transfer
+    // (a recognized cspr.trade testnet token) and present the tx as the receipt.
+    if (config.x402Asset === "wusdc") {
+      const payTo = req.payTo ?? config.x402Payee;
+      const pay = await payWusdc(payTo, config.x402WusdcPriceBase);
+      if (!pay.ok) throw new Error(`WUSDC x402 payment failed: ${pay.error}`);
+      const proof = {
+        x402Version: 2,
+        scheme: "casper-cep18",
+        asset: "wusdc",
+        from: config.x402Payee,
+        to: payTo,
+        amount: config.x402WusdcPriceBase,
+        tx: pay.txHash,
+      };
+      const paid = await fetch(url, {
+        headers: { "PAYMENT-SIGNATURE": Buffer.from(JSON.stringify(proof)).toString("base64") },
+      });
+      if (!paid.ok) throw new Error(`WUSDC payment rejected by ${url}: ${paid.status} ${await paid.text()}`);
+      return {
+        data: (await paid.json()) as T,
+        paid: true,
+        amountMotes: priceStr,
+        settlementTx: pay.txHash,
+        settlementMode: "wusdc",
+      };
+    }
 
     let payload: unknown;
     if (isV2(req)) {
