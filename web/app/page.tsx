@@ -5,6 +5,7 @@ import Onboarding from "./Onboarding";
 import { downloadReport } from "./report";
 
 const AGENT = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:4030";
+const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_AGENT_API_TOKEN ?? "";
 
 /* ------------------------------------------------------------- types */
 interface Policy {
@@ -163,12 +164,18 @@ export default function Dashboard() {
   const [token, setToken] = useState("");
   const cursor = useRef(0);
 
+  // Local demo convenience: if NEXT_PUBLIC_AGENT_API_TOKEN is provided (local/dev
+  // only — never bake it into a public deployment), the field auto-fills so you
+  // don't have to paste it. Otherwise you enter it manually. Persisted in
+  // localStorage so a manual entry sticks across sessions.
   useEffect(() => {
-    if (typeof window !== "undefined") setToken(window.sessionStorage.getItem("atlas_token") ?? "");
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("atlas_token");
+    setToken(stored ?? DEFAULT_TOKEN);
   }, []);
   const saveToken = (v: string) => {
     setToken(v);
-    if (typeof window !== "undefined") window.sessionStorage.setItem("atlas_token", v);
+    if (typeof window !== "undefined") window.localStorage.setItem("atlas_token", v);
   };
   const authHeaders = (): Record<string, string> => (token ? { Authorization: `Bearer ${token}` } : {});
 
