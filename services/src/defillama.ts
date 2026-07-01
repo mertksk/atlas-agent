@@ -194,19 +194,80 @@ export async function liquidity(id: string): Promise<LiquidityData | undefined> 
   };
 }
 
+/* ------------------------------------------------ protocol due-diligence (audits) */
+export interface Protocol {
+  name: string;
+  audits: number;
+  category?: string;
+  auditLinks: number;
+  chains: number;
+  listedAt: number | null; // unix seconds
+  url?: string;
+}
+let protoCache: { at: number; map: Map<string, Protocol> } | null = null;
+const PROTO_TTL_MS = 30 * 60 * 1000;
+
+async function fetchProtocols(): Promise<Map<string, Protocol>> {
+  if (protoCache && Date.now() - protoCache.at < PROTO_TTL_MS) return protoCache.map;
+  const r = await fetch("https://api.llama.fi/protocols", { signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error(`DefiLlama protocols ${r.status}`);
+  const arr = (await r.json()) as Array<Record<string, unknown>>;
+  const map = new Map<string, Protocol>();
+  for (const x of arr) {
+    const slug = String(x.slug ?? "");
+    if (!slug) continue;
+    map.set(slug, {
+      name: String(x.name ?? slug),
+      audits: Number(x.audits ?? 0) || 0,
+      category: x.category ? String(x.category) : undefined,
+      auditLinks: Array.isArray(x.audit_links) ? x.audit_links.length : 0,
+      chains: Array.isArray(x.chains) ? x.chains.length : 0,
+      listedAt: typeof x.listedAt === "number" ? x.listedAt : null,
+      url: x.url ? String(x.url) : undefined,
+    });
+  }
+  protoCache = { at: Date.now(), map };
+  return map;
+}
+
+/** Real due-diligence from DefiLlama protocol metadata: audit status, category, age. */
+export function assessProtocol(p: Pool, proto: Protocol | null): RwaDocSummary["legalRisk"] {
+  const audits = proto?.audits ?? 0;
+  if (p.outlier || audits === 0) return "high";
+  if (audits >= 2 && p.tvlUsd > 1e8) return "low";
+  return "medium";
+}
+
 export async function rwaDoc(id: string): Promise<RwaDocSummary | undefined> {
   const p = await pool(id);
   if (!p) return mockRwaDoc(id);
+  let proto: Protocol | null = null;
+  try {
+    proto = (await fetchProtocols()).get(p.project) ?? null;
+  } catch {
+    /* fall back to pool-only heuristics */
+  }
+
   const missing: string[] = [];
+  if (proto) {
+    if (proto.audits === 0) missing.push("No audit on record (DefiLlama)");
+    else if (proto.auditLinks === 0) missing.push("Audit exists but reports not publicly linked");
+    if (proto.listedAt && Date.now() / 1000 - proto.listedAt < 180 * 86400)
+      missing.push("Limited operating history (listed < 6 months ago)");
+  } else {
+    missing.push("Protocol not indexed by DefiLlama");
+  }
   if (!isRwa(p)) missing.push("No legal wrapper (permissionless DeFi protocol)");
   if (p.tvlUsd < 1e7) missing.push("Limited TVL / track record");
   if (p.outlier) missing.push("Yield flagged anomalous by DefiLlama");
+
+  const audits = proto?.audits ?? 0;
   return {
     opportunityId: id,
     collateralType: `${p.symbol} (${p.exposure}-asset${p.stablecoin ? ", stablecoin" : ""})`,
     maturity: "Open-ended (on-chain)",
-    counterparty: `${p.project} on ${p.chain}`,
-    legalRisk: isRwa(p) ? (p.tvlUsd > 1e8 ? "low" : "medium") : p.outlier ? "high" : "medium",
+    counterparty: `${proto?.name ?? p.project} · ${proto?.category ?? "DeFi"} · ${audits} audit(s)${proto?.url ? ` · ${proto.url}` : ""}`,
+    legalRisk: assessProtocol(p, proto),
     missingDisclosures: missing,
   };
 }

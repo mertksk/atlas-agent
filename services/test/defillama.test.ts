@@ -1,12 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { riskScore, riskLevel, selectPools, toOpportunity, isRwa, type Pool } from "../src/defillama.js";
+import { riskScore, riskLevel, selectPools, toOpportunity, isRwa, assessProtocol, type Pool, type Protocol } from "../src/defillama.js";
 
 const mk = (o: Partial<Pool>): Pool => ({
   pool: "id", chain: "Ethereum", project: "x", symbol: "TKN", tvlUsd: 1e8,
   apy: 5, apyBase: 5, apyReward: null, stablecoin: false, ilRisk: "no",
   exposure: "single", sigma: 0.05, outlier: false, predictions: { predictedClass: "Stable/Up" },
   ...o,
+});
+
+const proto = (o: Partial<Protocol>): Protocol => ({ name: "X", audits: 2, category: "Lending", auditLinks: 1, chains: 3, listedAt: null, ...o });
+
+test("assessProtocol: unaudited or outlier => high; audited blue-chip => low", () => {
+  assert.equal(assessProtocol(mk({ tvlUsd: 3e9 }), proto({ audits: 2 })), "low");
+  assert.equal(assessProtocol(mk({ tvlUsd: 3e9 }), proto({ audits: 0 })), "high"); // no audit on record
+  assert.equal(assessProtocol(mk({ outlier: true, tvlUsd: 3e9 }), proto({ audits: 3 })), "high"); // anomalous yield
+  assert.equal(assessProtocol(mk({ tvlUsd: 5e6 }), proto({ audits: 2 })), "medium"); // audited but small
+  assert.equal(assessProtocol(mk({ tvlUsd: 3e9 }), null), "high"); // unknown protocol
 });
 
 test("riskScore: blue-chip stablecoin is low, anomalous high-APY outlier is critical", () => {
