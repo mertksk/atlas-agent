@@ -171,8 +171,10 @@ export default function Dashboard() {
   // localStorage so a manual entry sticks across sessions.
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // Local mode: the prefilled default always wins (avoids a stale/wrong token
+    // stuck in localStorage). Public deploys (no default) use the entered token.
     const stored = window.localStorage.getItem("atlas_token");
-    setToken(stored ?? DEFAULT_TOKEN);
+    setToken(DEFAULT_TOKEN || stored || "");
   }, []);
   const saveToken = (v: string) => {
     setToken(v);
