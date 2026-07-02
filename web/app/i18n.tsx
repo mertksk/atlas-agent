@@ -9,17 +9,17 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 export const LANGS = [
-  { code: "en", native: "English" },
-  { code: "zh", native: "中文" },
-  { code: "hi", native: "हिन्दी" },
-  { code: "es", native: "Español" },
-  { code: "fr", native: "Français" },
-  { code: "ar", native: "العربية", rtl: true },
-  { code: "bn", native: "বাংলা" },
-  { code: "pt", native: "Português" },
-  { code: "ru", native: "Русский" },
-  { code: "ur", native: "اردو", rtl: true },
-  { code: "tr", native: "Türkçe" },
+  { code: "en", native: "English", flag: "🇬🇧" },
+  { code: "zh", native: "中文", flag: "🇨🇳" },
+  { code: "hi", native: "हिन्दी", flag: "🇮🇳" },
+  { code: "es", native: "Español", flag: "🇪🇸" },
+  { code: "fr", native: "Français", flag: "🇫🇷" },
+  { code: "ar", native: "العربية", flag: "🇸🇦", rtl: true },
+  { code: "bn", native: "বাংলা", flag: "🇧🇩" },
+  { code: "pt", native: "Português", flag: "🇧🇷" },
+  { code: "ru", native: "Русский", flag: "🇷🇺" },
+  { code: "ur", native: "اردو", flag: "🇵🇰", rtl: true },
+  { code: "tr", native: "Türkçe", flag: "🇹🇷" },
 ] as const;
 export type Lang = (typeof LANGS)[number]["code"];
 const RTL = new Set<Lang>(["ar", "ur"]);
@@ -888,10 +888,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // Default is ALWAYS English — no browser-language auto-detection. Only an
+    // explicit pick from the header selector (persisted) changes the language.
     const stored = window.localStorage.getItem("atlas_lang") as Lang | null;
-    const nav = (window.navigator.language ?? "en").slice(0, 2) as Lang;
-    const initial: Lang = stored && stored in DICTS ? stored : nav in DICTS ? nav : "en";
-    setLangState(initial);
+    setLangState(stored && stored in DICTS ? stored : "en");
   }, []);
 
   useEffect(() => {

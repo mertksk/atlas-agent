@@ -299,7 +299,7 @@ export default function Dashboard() {
           >
             {LANGS.map((l) => (
               <option key={l.code} value={l.code}>
-                {l.native}
+                {l.flag} {l.native}
               </option>
             ))}
           </select>
