@@ -84,13 +84,16 @@ interface Health {
 }
 
 /* ---------------------------------------------------------- the agent pipeline */
+// Each role gets a plain-language job description (always visible) and a
+// present-tense "doing" line for the live status strip — so a first-time
+// visitor can tell what pressing "run analysis" actually does.
 const ROLES = [
-  { key: "scout", label: "Scout" },
-  { key: "analyst", label: "Analyst" },
-  { key: "risk-officer", label: "Risk Officer" },
-  { key: "treasurer", label: "Treasurer" },
-  { key: "policy-guard", label: "Policy Guard" },
-  { key: "executor", label: "Executor" },
+  { key: "scout", label: "Scout", desc: "finds live pools", doing: "scanning the market for opportunities" },
+  { key: "analyst", label: "Analyst", desc: "buys paid evidence", doing: "buying risk data over x402 — each item is a real paid request" },
+  { key: "risk-officer", label: "Risk Officer", desc: "scores the danger", doing: "scoring risk from the purchased evidence" },
+  { key: "treasurer", label: "Treasurer", desc: "sizes the investment", doing: "deciding how much (if anything) to invest" },
+  { key: "policy-guard", label: "Policy Guard", desc: "enforces the rules", doing: "checking every rule — caps, risk ceiling, confidence" },
+  { key: "executor", label: "Executor", desc: "moves the money", doing: "executing on-chain and recording the decision" },
 ] as const;
 const ROLE_COLOR: Record<string, string> = {
   scout: "var(--steel)",
@@ -106,9 +109,29 @@ const fmtDur = (s?: number) => {
   if (s == null) return "—";
   if (s < 60) return `${Math.round(s)}s`;
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
+  if (m < 60) return `${m}m ${Math.round(s % 60)}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 };
+
+/** Payment amounts arrive in the settlement asset's base units. */
+function fmtPayment(p: Payment): string {
+  if (!p.amount) return "?";
+  try {
+    const n = Number(BigInt(p.amount));
+    return p.settlement?.mode === "wusdc" ? `${(n / 1e6).toFixed(4)} WUSDC` : `${cspr(n / 1e9)} CSPR`;
+  } catch {
+    return "?";
+  }
+}
+
+/** Replace raw pool ids / long hashes in agent messages with readable names. */
+function humanize(msg: string, names: Map<string, string>): string {
+  let out = msg;
+  for (const [id, name] of names) if (id && out.includes(id)) out = out.split(id).join(name);
+  return out
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, (m) => `${m.slice(0, 8)}…`)
+    .replace(/\b[0-9a-f]{24,64}\b/gi, (m) => `${m.slice(0, 10)}…`);
+}
 
 /** Tween a number toward its target (ease-out cubic) for the vault figure. */
 function useCountUp(target: number, ms = 750): number {
@@ -143,12 +166,14 @@ function pipelineState(ledger: Entry[], running: boolean) {
   }
   const counts: Record<string, number> = {};
   let last: string | null = null;
+  let lastEntry: Entry | null = null;
   for (const e of ledger.slice(start)) {
     if (e.agent === "system") continue;
     counts[e.agent] = (counts[e.agent] ?? 0) + 1;
     last = e.agent;
+    lastEntry = e;
   }
-  return { counts, current: running ? last : null };
+  return { counts, current: running ? last : null, lastEntry };
 }
 
 /* -------------------------------------------------------------- page */
@@ -164,6 +189,9 @@ export default function Dashboard() {
   const [token, setToken] = useState("");
   const [editingToken, setEditingToken] = useState(false);
   const cursor = useRef(0);
+  // id -> human name, accumulated across polls so old ledger lines stay readable
+  const names = useRef(new Map<string, string>());
+  const runStartedAt = useRef<number | null>(null);
 
   // Local demo convenience: if NEXT_PUBLIC_AGENT_API_TOKEN is provided (local/dev
   // only — never bake it into a public deployment), the field auto-fills so you
@@ -202,6 +230,12 @@ export default function Dashboard() {
       setMetrics(m);
       setHealth(h);
       setOffline(false);
+      // learn readable names for raw pool ids
+      for (const opp of o as Opp[]) names.current.set(opp.id, opp.name);
+      for (const a of (s as State).pendingApprovals ?? []) names.current.set(a.opportunityId, a.opportunityName);
+      // track when a run started (for the elapsed timer)
+      if ((s as State).running && runStartedAt.current == null) runStartedAt.current = Date.now();
+      if (!(s as State).running) runStartedAt.current = null;
     } catch {
       setOffline(true);
     }
@@ -231,6 +265,10 @@ export default function Dashboard() {
   const budget = state?.policy.dataBudgetCspr ?? 1;
   const treasury = useCountUp(state?.treasuryBalanceCspr ?? 0);
   const pipe = pipelineState(ledger, state?.running ?? false);
+  const activeRole = ROLES.find((r) => r.key === pipe.current);
+  const activeStep = activeRole ? ROLES.indexOf(activeRole) + 1 : 0;
+  const lastRunSummary = [...ledger].reverse().find((e) => e.agent === "system" && /run complete/i.test(e.message));
+  const pendingCount = state?.pendingApprovals.length ?? 0;
 
   return (
     <div className="shell">
@@ -254,7 +292,9 @@ export default function Dashboard() {
               <span className={`chip ${state.mode === "live" ? "live" : "dry"} pulse`}>
                 <i className="dot" /> {state.mode === "live" ? "casper testnet · live" : "dry-run"}
               </span>
-              <span className="chip">{state.reasoner ?? (state.llm ? "llm reasoning" : "deterministic")}</span>
+              <span className="chip" title="The AI model doing the reasoning">
+                {state.reasoner ?? (state.llm ? "llm reasoning" : "deterministic")}
+              </span>
             </>
           )}
           <button
@@ -284,7 +324,12 @@ export default function Dashboard() {
               title="Bearer token for run/approve (set AGENT_API_TOKEN on the agent)"
             />
           )}
-          <button className={`run-btn ${state?.running ? "working" : ""}`} onClick={runAnalysis} disabled={!state || state.running}>
+          <button
+            className={`run-btn ${state?.running ? "working" : ""}`}
+            onClick={runAnalysis}
+            disabled={!state || state.running}
+            title="Scans live pools, buys evidence with real x402 payments, decides, records on-chain. A live run takes a few minutes."
+          >
             {state?.running ? "agents working…" : "run analysis"}
           </button>
         </div>
@@ -301,11 +346,11 @@ export default function Dashboard() {
           <div className="substats">
             <div>
               <span className="n">{state ? cspr(state.spentTodayCspr) : "—"}</span>
-              <span className="l">allocated today</span>
+              <span className="l">invested today</span>
             </div>
             <div>
               <span className="n">{cspr(dataSpend)}</span>
-              <span className="l">evidence bought (last run)</span>
+              <span className="l">spent on evidence (last run)</span>
             </div>
             <div>
               <span className="n">{metrics?.decisions ?? "—"}</span>
@@ -320,8 +365,8 @@ export default function Dashboard() {
 
         <section className="pipeline reveal reveal-2">
           <div className="phead">
-            <h2>The desk — six agents, one mandate</h2>
-            <span className="live-cost">
+            <h2>The desk — six agents work left to right</h2>
+            <span className="live-cost" title="How much of this run's data budget went to paid evidence">
               evidence budget&nbsp; <b>{cspr(dataSpend)}</b> / {cspr(budget)} CSPR
             </span>
           </div>
@@ -337,10 +382,57 @@ export default function Dashboard() {
                 >
                   <span className="node">{i + 1}</span>
                   <span className="role">{r.label}</span>
-                  <span className="count">{done ? `${pipe.counts[r.key]} notes` : ""}</span>
+                  <span className="desc">{r.desc}</span>
+                  <span className="count">{active ? "working…" : done ? `✓ ${pipe.counts[r.key]}` : ""}</span>
                 </div>
               );
             })}
+          </div>
+
+          {/* live narration — what is actually happening right now */}
+          <div
+            className={`desk-status ${state?.running ? "running" : ""}`}
+            style={activeRole ? ({ "--role": ROLE_COLOR[activeRole.key] } as React.CSSProperties) : undefined}
+          >
+            {state?.running ? (
+              <>
+                <span className="spin" aria-hidden />
+                <div>
+                  <div className="ds-line">
+                    <b>
+                      {activeRole ? `${activeRole.label} is ${activeRole.doing}` : "Starting the run — the desk is waking up"}
+                    </b>
+                    <span className="ds-meta">
+                      {activeStep > 0 ? ` · step ${activeStep}/6` : ""} ·{" "}
+                      {fmtDur(runStartedAt.current ? (Date.now() - runStartedAt.current) / 1000 : undefined)} elapsed
+                    </span>
+                  </div>
+                  {pipe.lastEntry && <div className="ds-detail">{humanize(pipe.lastEntry.message, names.current)}</div>}
+                </div>
+              </>
+            ) : lastRunSummary ? (
+              <div>
+                <div className="ds-line">
+                  <b>Last run finished.</b>
+                  <span className="ds-meta"> {humanize(lastRunSummary.message.replace(/^Run complete: /i, ""), names.current)}</span>
+                </div>
+                <div className="ds-detail">
+                  Press <b>run analysis</b> to start a new cycle — the desk scans real pools, pays for evidence over
+                  x402, then decides. {pendingCount > 0 ? `${pendingCount} decision(s) below are waiting for you.` : ""}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="ds-line">
+                  <b>Ready when you are.</b>
+                </div>
+                <div className="ds-detail">
+                  Press <b>run analysis</b> and watch the desk work left to right: find pools → buy evidence (real x402
+                  payments) → score risk → size the bet → check the rules → execute on-chain. A live run takes a few
+                  minutes.
+                </div>
+              </div>
+            )}
           </div>
         </section>
       </div>
@@ -350,65 +442,99 @@ export default function Dashboard() {
         {/* left rail */}
         <aside>
           <section className="panel reveal reveal-2">
-            <h2>Policy — enforced on-chain</h2>
+            <h2>The rules — enforced by the contract</h2>
+            <p className="sub">The agent physically cannot break these; the smart contract rejects the transaction.</p>
             {state ? (
               <>
-                <div className="rail-row">
-                  <span className="k">per allocation</span>
+                <div className="rail-row" title="The agent can never put more than this into a single opportunity">
+                  <span className="k">max per investment</span>
                   <span className="v">≤ {state.policy.maxAllocationPerOpCspr} CSPR</span>
                 </div>
-                <div className="rail-row">
-                  <span className="k">daily spend</span>
+                <div className="rail-row" title="Hard daily ceiling, resets at midnight UTC">
+                  <span className="k">max per day</span>
                   <span className="v">≤ {state.policy.maxDailySpendCspr} CSPR</span>
                 </div>
-                <div className="rail-row">
-                  <span className="k">risk ceiling</span>
+                <div className="rail-row" title="Anything scored riskier than this is rejected automatically">
+                  <span className="k">auto-reject risk above</span>
                   <span className="v">{state.policy.maxRiskScore} / 100</span>
                 </div>
-                <div className="rail-row">
-                  <span className="k">min confidence</span>
+                <div className="rail-row" title="Below this confidence the agent won't act at all">
+                  <span className="k">min confidence to act</span>
                   <span className="v">{Math.round(state.policy.minConfidence * 100)}%</span>
                 </div>
-                <div className="rail-row">
-                  <span className="k">human sign-off over</span>
+                <div className="rail-row" title="Anything bigger than this waits for a human to approve it">
+                  <span className="k">your sign-off needed over</span>
                   <span className="v">{state.policy.approvalThresholdCspr} CSPR</span>
                 </div>
                 <div className="meter" aria-hidden>
                   <i style={{ width: `${Math.min((dataSpend / budget) * 100, 100)}%` }} />
                 </div>
-                <div className="meter-cap">data budget {cspr(dataSpend)} / {cspr(budget)} CSPR spent</div>
+                <div className="meter-cap">
+                  evidence budget: {cspr(dataSpend)} of {cspr(budget)} CSPR used last run
+                </div>
               </>
             ) : (
               <div className="empty">connecting…</div>
             )}
           </section>
 
-          <section className="panel reveal reveal-3">
-            <h2>Contracts</h2>
+          <details className="panel contracts-details reveal reveal-3">
+            <summary>
+              Contracts <span className="sum-hint">on-chain addresses</span>
+            </summary>
             <div className="contract">
-              <span className="cn">TreasuryVault</span>
-              <span className={`cv ${state?.contracts.vault ? "" : "off"}`}>
-                {state?.contracts.vault ? `${state.contracts.vault.slice(0, 22)}…` : "not deployed"}
-              </span>
+              <span className="cn">TreasuryVault — holds &amp; guards the money</span>
+              {state?.contracts.vault ? (
+                <a
+                  className="cv"
+                  href={`https://testnet.cspr.live/contract-package/${state.contracts.vault.replace("hash-", "")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {state.contracts.vault.slice(0, 26)}…
+                </a>
+              ) : (
+                <span className="cv off">not deployed</span>
+              )}
             </div>
             <div className="contract">
-              <span className="cn">DecisionRegistry</span>
-              <span className={`cv ${state?.contracts.registry ? "" : "off"}`}>
-                {state?.contracts.registry ? `${state.contracts.registry.slice(0, 22)}…` : "not deployed"}
-              </span>
+              <span className="cn">DecisionRegistry — permanent decision log</span>
+              {state?.contracts.registry ? (
+                <a
+                  className="cv"
+                  href={`https://testnet.cspr.live/contract-package/${state.contracts.registry.replace("hash-", "")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {state.contracts.registry.slice(0, 26)}…
+                </a>
+              ) : (
+                <span className="cv off">not deployed</span>
+              )}
             </div>
-          </section>
+          </details>
         </aside>
 
-        {/* center — opportunities */}
+        {/* center — approvals + opportunities */}
         <section>
-          {state && state.pendingApprovals.length > 0 && (
+          {state && pendingCount > 0 && (
             <div className="approvals">
+              <div className="approvals-head">
+                <h2>
+                  Needs your sign-off <span className="badge">{pendingCount}</span>
+                </h2>
+                <p className="sub">
+                  These are above your {state.policy.approvalThresholdCspr} CSPR threshold. Approving executes the
+                  investment on-chain — for real.
+                </p>
+              </div>
               {state.pendingApprovals.map((a) => (
                 <div className="approval" key={`${a.runId}-${a.opportunityId}`}>
                   <div className="what">
-                    Allocate <b>{a.amountCspr} CSPR</b> to {a.opportunityName}? Risk {a.riskScore}, confidence{" "}
-                    {Math.round(a.confidence * 100)}% — above the auto-execution threshold.
+                    Invest <b>{a.amountCspr} CSPR</b> in <b>{a.opportunityName}</b>?
+                    <span className="ap-meta">
+                      risk {a.riskScore}/100 · confidence {Math.round(a.confidence * 100)}%
+                    </span>
                   </div>
                   <button className="approve-btn" onClick={() => approve(a)}>
                     approve
@@ -419,7 +545,10 @@ export default function Dashboard() {
           )}
 
           <div className="opps-head">
-            <h2>Opportunities</h2>
+            <div>
+              <h2>Opportunities</h2>
+              <p className="sub">Real pools, live from DefiLlama. The agent's verdict on each is stamped on the card.</p>
+            </div>
             <span className="count">{opps.length} on the desk</span>
           </div>
 
@@ -439,6 +568,16 @@ export default function Dashboard() {
             const risk = d?.riskScore ?? null;
             const riskColor =
               risk === null ? "var(--faint)" : risk > 60 ? "var(--coral)" : risk > 35 ? "var(--copper)" : "var(--jade)";
+            const actionLabel =
+              d?.action === "ALLOCATE"
+                ? "invested"
+                : d?.action === "REJECT"
+                  ? "rejected"
+                  : d?.action === "QUEUE_FOR_APPROVAL"
+                    ? "awaiting sign-off"
+                    : d?.action === "HOLD"
+                      ? "on hold"
+                      : null;
             return (
               <article className={`opp ${cls}`} key={o.id} style={{ animationDelay: `${Math.min(idx * 60, 360)}ms` }}>
                 <div className="opp-head">
@@ -447,12 +586,12 @@ export default function Dashboard() {
                     <h3>{o.name}</h3>
                   </div>
                   <div className="right">
-                    <span className={`apy ${apy > 30 ? "absurd" : ""}`}>
+                    <span className={`apy ${apy > 30 ? "absurd" : ""}`} title="The yield this pool advertises — before the agent verifies it">
                       advertised
                       <br />
                       <b>{apy.toFixed(1)}%</b> APY
                     </span>
-                    {d && <span className={`action ${d.action}`}>{d.action.replaceAll("_", " ")}</span>}
+                    {d && actionLabel && <span className={`action ${d.action}`}>{actionLabel}</span>}
                   </div>
                 </div>
 
@@ -461,24 +600,32 @@ export default function Dashboard() {
                   <span className="track" aria-hidden>
                     <i style={{ width: `${risk ?? 0}%`, background: riskColor }} />
                   </span>
-                  <span>conf {d ? `${Math.round(d.confidence * 100)}%` : "—"}</span>
+                  <span>confidence {d ? `${Math.round(d.confidence * 100)}%` : "—"}</span>
                 </div>
 
-                <p className="why">{d ? d.reason : o.blurb}</p>
+                <p className="why">
+                  {d ? (
+                    <>
+                      <span className="why-tag">agent&apos;s reasoning</span> {d.reason}
+                    </>
+                  ) : (
+                    o.blurb
+                  )}
+                </p>
                 {d && (
                   <p className="bought">
                     {d.dataSources.length > 0 ? (
                       <>
-                        <span className="x402">x402</span>
-                        evidence: {d.dataSources.join(" + ")} · <b>{cspr(d.dataCostCspr)} CSPR</b>
+                        <span className="x402" title="Paid for with a real on-chain micro-payment">x402</span>
+                        evidence bought: {d.dataSources.join(" + ")} · <b>{cspr(d.dataCostCspr)} CSPR</b>
                       </>
                     ) : (
-                      "no data purchased for this opportunity"
+                      "no paid evidence needed for this one"
                     )}
                     {d.action === "ALLOCATE" && (
                       <>
                         {" "}
-                        — allocated <b>{d.amountCspr} CSPR</b>
+                        — invested <b>{d.amountCspr} CSPR</b>
                       </>
                     )}
                   </p>
@@ -491,17 +638,18 @@ export default function Dashboard() {
         {/* right — ledger + settlements */}
         <aside>
           <section className="panel reveal reveal-3">
-            <h2>Decision ledger — every step, posted</h2>
+            <h2>Work log — every step, in order</h2>
+            <p className="sub">What each agent did and why, newest first. Nothing is hidden.</p>
             <div className="ledger">
               {ledger.length === 0 && (
-                <div className="empty">No entries yet. Run an analysis to watch the desk post its work.</div>
+                <div className="empty">Quiet for now. Run an analysis and the agents will post their work here live.</div>
               )}
               {[...ledger].reverse().map((e, i) => (
                 <div className="entry" key={`${e.ts}-${i}`}>
                   <time>{e.ts.slice(11, 19)}</time>
                   <div>
                     <span className={`who ${e.agent}`}>{e.agent.replaceAll("-", " ")}</span>
-                    <span className="msg">{e.message}</span>
+                    <span className="msg">{humanize(e.message, names.current)}</span>
                   </div>
                 </div>
               ))}
@@ -509,18 +657,29 @@ export default function Dashboard() {
           </section>
 
           <section className="panel reveal reveal-4">
-            <h2>x402 settlements</h2>
+            <h2>Payment receipts — x402</h2>
+            <p className="sub">Every piece of evidence was paid for on-chain. These are the receipts.</p>
             {payments.length === 0 && <div className="empty">No payments yet.</div>}
             {payments
               .slice(-8)
               .reverse()
               .map((p, i) => (
                 <div className="pay" key={i}>
-                  <span className="amt">{p.amount ? cspr(Number(BigInt(p.amount)) / 1e9) : "?"} CSPR</span>
+                  <span className="amt">{fmtPayment(p)}</span>
                   <span className="res">{p.resource?.replace("/api/", "") ?? "—"}</span>
-                  <span className={`tx ${p.settlement?.transaction ? "settled" : ""}`}>
-                    {p.settlement?.transaction ? `${p.settlement.transaction.slice(0, 10)}…` : p.settlement?.mode}
-                  </span>
+                  {p.settlement?.transaction ? (
+                    <a
+                      className="tx settled"
+                      href={`https://testnet.cspr.live/deploy/${p.settlement.transaction}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="View this payment on the Casper explorer"
+                    >
+                      {p.settlement.transaction.slice(0, 10)}…
+                    </a>
+                  ) : (
+                    <span className="tx">{p.settlement?.mode}</span>
+                  )}
                 </div>
               ))}
           </section>
