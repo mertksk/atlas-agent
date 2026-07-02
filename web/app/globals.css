@@ -186,6 +186,24 @@ button { font: inherit; }
 .report-btn:hover:not(:disabled) { border-color: var(--copper); color: var(--copper); transform: translateY(-1px); }
 .report-btn:disabled { opacity: 0.4; cursor: default; }
 
+.lang-select {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.015);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 160ms, color 160ms;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.lang-select:hover, .lang-select:focus { border-color: var(--copper); color: var(--text); }
+.lang-select option { background: var(--surface); color: var(--text); }
+
 .token-input {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -254,7 +272,7 @@ button { font: inherit; }
 }
 .vault::before {
   content: "";
-  position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  position: absolute; inset-inline-start: 0; top: 0; bottom: 0; width: 3px;
   background: linear-gradient(180deg, var(--copper), transparent);
 }
 .vault .label {
@@ -344,9 +362,9 @@ button { font: inherit; }
   border-radius: 10px;
   background: var(--ink);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--line);
+  border-inline-start: 3px solid var(--line);
 }
-.desk-status.running { border-left-color: var(--role, var(--copper)); }
+.desk-status.running { border-inline-start-color: var(--role, var(--copper)); }
 .desk-status .spin {
   flex: none;
   width: 15px;
@@ -509,7 +527,7 @@ a.cv:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
   animation: rise 420ms ease both;
 }
 .opp:hover { transform: translateY(-2px); border-color: var(--line-soft); }
-.opp::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--faint); opacity: 0.5; transition: background 200ms; }
+.opp::before { content: ""; position: absolute; inset-inline-start: 0; top: 0; bottom: 0; width: 3px; background: var(--faint); opacity: 0.5; transition: background 200ms; }
 .opp.allocated::before { background: var(--jade); opacity: 1; }
 .opp.rejected::before { background: var(--coral); opacity: 1; }
 .opp.queued::before { background: var(--copper); opacity: 1; }

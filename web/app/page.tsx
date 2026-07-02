@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Onboarding from "./Onboarding";
 import { downloadReport } from "./report";
+import { useI18n, LANGS, type Lang, type StrKey } from "./i18n";
 
 const AGENT = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:4030";
 const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_AGENT_API_TOKEN ?? "";
@@ -84,17 +85,16 @@ interface Health {
 }
 
 /* ---------------------------------------------------------- the agent pipeline */
-// Each role gets a plain-language job description (always visible) and a
-// present-tense "doing" line for the live status strip — so a first-time
-// visitor can tell what pressing "run analysis" actually does.
-const ROLES = [
-  { key: "scout", label: "Scout", desc: "finds live pools", doing: "scanning the market for opportunities" },
-  { key: "analyst", label: "Analyst", desc: "buys paid evidence", doing: "buying risk data over x402 — each item is a real paid request" },
-  { key: "risk-officer", label: "Risk Officer", desc: "scores the danger", doing: "scoring risk from the purchased evidence" },
-  { key: "treasurer", label: "Treasurer", desc: "sizes the investment", doing: "deciding how much (if anything) to invest" },
-  { key: "policy-guard", label: "Policy Guard", desc: "enforces the rules", doing: "checking every rule — caps, risk ceiling, confidence" },
-  { key: "executor", label: "Executor", desc: "moves the money", doing: "executing on-chain and recording the decision" },
-] as const;
+// Role metadata references i18n keys: l = label, d = job description (always
+// visible), g = present-tense "doing" line for the live status strip.
+const ROLES: ReadonlyArray<{ key: string; l: StrKey; d: StrKey; g: StrKey }> = [
+  { key: "scout", l: "rScout", d: "rScoutD", g: "rScoutG" },
+  { key: "analyst", l: "rAnalyst", d: "rAnalystD", g: "rAnalystG" },
+  { key: "risk-officer", l: "rRiskO", d: "rRiskOD", g: "rRiskOG" },
+  { key: "treasurer", l: "rTreas", d: "rTreasD", g: "rTreasG" },
+  { key: "policy-guard", l: "rPolicy", d: "rPolicyD", g: "rPolicyG" },
+  { key: "executor", l: "rExec", d: "rExecD", g: "rExecG" },
+];
 const ROLE_COLOR: Record<string, string> = {
   scout: "var(--steel)",
   analyst: "var(--copper)",
@@ -131,6 +131,13 @@ function humanize(msg: string, names: Map<string, string>): string {
   return out
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, (m) => `${m.slice(0, 8)}…`)
     .replace(/\b[0-9a-f]{24,64}\b/gi, (m) => `${m.slice(0, 10)}…`);
+}
+
+/** Render a translated template, bolding the {amount}/{name} slots (order-safe across languages). */
+function tRich(template: string, parts: { amount: ReactNode; name: ReactNode }): ReactNode[] {
+  return template.split(/(\{amount\}|\{name\})/g).map((tok, i) =>
+    tok === "{amount}" ? <b key={i}>{parts.amount}</b> : tok === "{name}" ? <b key={i}>{parts.name}</b> : tok,
+  );
 }
 
 /** Tween a number toward its target (ease-out cubic) for the vault figure. */
@@ -178,6 +185,7 @@ function pipelineState(ledger: Entry[], running: boolean) {
 
 /* -------------------------------------------------------------- page */
 export default function Dashboard() {
+  const { t, lang, setLang } = useI18n();
   const [state, setState] = useState<State | null>(null);
   const [opps, setOpps] = useState<Opp[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
@@ -279,21 +287,34 @@ export default function Dashboard() {
           <h1>
             ATLA<em>S</em>
           </h1>
-          <span className="tag">autonomous treasury · buys the evidence before it moves the money</span>
+          <span className="tag">{t("tagline")}</span>
         </div>
         <div className="mast-right">
+          <select
+            className="lang-select"
+            value={lang}
+            onChange={(e) => setLang(e.target.value as Lang)}
+            title="Language / Dil"
+            aria-label="Language"
+          >
+            {LANGS.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.native}
+              </option>
+            ))}
+          </select>
           {offline && (
             <span className="chip alert pulse">
-              <i className="dot" /> agent offline
+              <i className="dot" /> {t("offline")}
             </span>
           )}
           {state && (
             <>
               <span className={`chip ${state.mode === "live" ? "live" : "dry"} pulse`}>
-                <i className="dot" /> {state.mode === "live" ? "casper testnet · live" : "dry-run"}
+                <i className="dot" /> {state.mode === "live" ? t("live") : t("dry")}
               </span>
-              <span className="chip" title="The AI model doing the reasoning">
-                {state.reasoner ?? (state.llm ? "llm reasoning" : "deterministic")}
+              <span className="chip" title={t("reasonerW")}>
+                {state.reasoner ?? (state.llm ? t("llm") : t("det"))}
               </span>
             </>
           )}
@@ -301,36 +322,36 @@ export default function Dashboard() {
             className="report-btn"
             onClick={() => downloadReport({ state, opps, decisions, payments, ledger }).catch(() => undefined)}
             disabled={!state}
-            title="Download an .xlsx report: decisions, evidence bought, x402 settlements, ledger"
+            title={t("reportT")}
           >
-            ⤓ report
+            ⤓ {t("report")}
           </button>
           {token && !editingToken ? (
-            <span className="chip authed" title="Authorized to run analysis and approve allocations">
-              <i className="dot" /> authorized
-              <button className="chip-link" onClick={() => setEditingToken(true)} title="Change API token">
-                change
+            <span className="chip authed" title={t("authedT")}>
+              <i className="dot" /> {t("authed")}
+              <button className="chip-link" onClick={() => setEditingToken(true)} title={t("apiToken")}>
+                {t("change")}
               </button>
             </span>
           ) : (
             <input
               className="token-input"
               type="password"
-              placeholder="API token"
+              placeholder={t("apiToken")}
               value={token}
               autoFocus={editingToken}
               onChange={(e) => saveToken(e.target.value)}
               onBlur={() => setEditingToken(false)}
-              title="Bearer token for run/approve (set AGENT_API_TOKEN on the agent)"
+              title={t("tokenT")}
             />
           )}
           <button
             className={`run-btn ${state?.running ? "working" : ""}`}
             onClick={runAnalysis}
             disabled={!state || state.running}
-            title="Scans live pools, buys evidence with real x402 payments, decides, records on-chain. A live run takes a few minutes."
+            title={t("runT")}
           >
-            {state?.running ? "agents working…" : "run analysis"}
+            {state?.running ? t("running") : t("run")}
           </button>
         </div>
       </header>
@@ -338,7 +359,7 @@ export default function Dashboard() {
       {/* ------------------------------------------------------------- hero */}
       <div className="hero">
         <section className="vault reveal reveal-1">
-          <span className="label">Treasury under management</span>
+          <span className="label">{t("treasury")}</span>
           <div className="figure">
             {state ? cspr(treasury) : "—"}
             <span className="unit">CSPR</span>
@@ -346,28 +367,28 @@ export default function Dashboard() {
           <div className="substats">
             <div>
               <span className="n">{state ? cspr(state.spentTodayCspr) : "—"}</span>
-              <span className="l">invested today</span>
+              <span className="l">{t("investedToday")}</span>
             </div>
             <div>
               <span className="n">{cspr(dataSpend)}</span>
-              <span className="l">spent on evidence (last run)</span>
+              <span className="l">{t("evidenceSpent")}</span>
             </div>
             <div>
               <span className="n">{metrics?.decisions ?? "—"}</span>
-              <span className="l">decisions on-chain</span>
+              <span className="l">{t("decisionsOnChain")}</span>
             </div>
             <div>
               <span className="n">{state?.runs ?? 0}</span>
-              <span className="l">runs</span>
+              <span className="l">{t("runs")}</span>
             </div>
           </div>
         </section>
 
         <section className="pipeline reveal reveal-2">
           <div className="phead">
-            <h2>The desk — six agents work left to right</h2>
-            <span className="live-cost" title="How much of this run's data budget went to paid evidence">
-              evidence budget&nbsp; <b>{cspr(dataSpend)}</b> / {cspr(budget)} CSPR
+            <h2>{t("deskTitle")}</h2>
+            <span className="live-cost" title={t("evBudgetT")}>
+              {t("evBudget")}&nbsp; <b>{cspr(dataSpend)}</b> / {cspr(budget)} CSPR
             </span>
           </div>
           <div className="flow">
@@ -381,9 +402,9 @@ export default function Dashboard() {
                   style={{ "--role": ROLE_COLOR[r.key] } as React.CSSProperties}
                 >
                   <span className="node">{i + 1}</span>
-                  <span className="role">{r.label}</span>
-                  <span className="desc">{r.desc}</span>
-                  <span className="count">{active ? "working…" : done ? `✓ ${pipe.counts[r.key]}` : ""}</span>
+                  <span className="role">{t(r.l)}</span>
+                  <span className="desc">{t(r.d)}</span>
+                  <span className="count">{active ? t("working") : done ? `✓ ${pipe.counts[r.key]}` : ""}</span>
                 </div>
               );
             })}
@@ -399,12 +420,11 @@ export default function Dashboard() {
                 <span className="spin" aria-hidden />
                 <div>
                   <div className="ds-line">
-                    <b>
-                      {activeRole ? `${activeRole.label} is ${activeRole.doing}` : "Starting the run — the desk is waking up"}
-                    </b>
+                    <b>{activeRole ? t("nowFmt", { role: t(activeRole.l), doing: t(activeRole.g) }) : t("starting")}</b>
                     <span className="ds-meta">
-                      {activeStep > 0 ? ` · step ${activeStep}/6` : ""} ·{" "}
-                      {fmtDur(runStartedAt.current ? (Date.now() - runStartedAt.current) / 1000 : undefined)} elapsed
+                      {activeStep > 0 ? ` · ${t("stepW")} ${activeStep}/6` : ""} ·{" "}
+                      {fmtDur(runStartedAt.current ? (Date.now() - runStartedAt.current) / 1000 : undefined)}{" "}
+                      {t("elapsed")}
                     </span>
                   </div>
                   {pipe.lastEntry && <div className="ds-detail">{humanize(pipe.lastEntry.message, names.current)}</div>}
@@ -413,24 +433,19 @@ export default function Dashboard() {
             ) : lastRunSummary ? (
               <div>
                 <div className="ds-line">
-                  <b>Last run finished.</b>
+                  <b>{t("lastRun")}</b>
                   <span className="ds-meta"> {humanize(lastRunSummary.message.replace(/^Run complete: /i, ""), names.current)}</span>
                 </div>
                 <div className="ds-detail">
-                  Press <b>run analysis</b> to start a new cycle — the desk scans real pools, pays for evidence over
-                  x402, then decides. {pendingCount > 0 ? `${pendingCount} decision(s) below are waiting for you.` : ""}
+                  {t("pressNext")} {pendingCount > 0 ? t("waiting", { n: pendingCount }) : ""}
                 </div>
               </div>
             ) : (
               <div>
                 <div className="ds-line">
-                  <b>Ready when you are.</b>
+                  <b>{t("ready")}</b>
                 </div>
-                <div className="ds-detail">
-                  Press <b>run analysis</b> and watch the desk work left to right: find pools → buy evidence (real x402
-                  payments) → score risk → size the bet → check the rules → execute on-chain. A live run takes a few
-                  minutes.
-                </div>
+                <div className="ds-detail">{t("readyD")}</div>
               </div>
             )}
           </div>
@@ -442,48 +457,46 @@ export default function Dashboard() {
         {/* left rail */}
         <aside>
           <section className="panel reveal reveal-2">
-            <h2>The rules — enforced by the contract</h2>
-            <p className="sub">The agent physically cannot break these; the smart contract rejects the transaction.</p>
+            <h2>{t("rulesTitle")}</h2>
+            <p className="sub">{t("rulesSub")}</p>
             {state ? (
               <>
-                <div className="rail-row" title="The agent can never put more than this into a single opportunity">
-                  <span className="k">max per investment</span>
+                <div className="rail-row" title={t("ruleMaxPerT")}>
+                  <span className="k">{t("ruleMaxPer")}</span>
                   <span className="v">≤ {state.policy.maxAllocationPerOpCspr} CSPR</span>
                 </div>
-                <div className="rail-row" title="Hard daily ceiling, resets at midnight UTC">
-                  <span className="k">max per day</span>
+                <div className="rail-row" title={t("ruleMaxDayT")}>
+                  <span className="k">{t("ruleMaxDay")}</span>
                   <span className="v">≤ {state.policy.maxDailySpendCspr} CSPR</span>
                 </div>
-                <div className="rail-row" title="Anything scored riskier than this is rejected automatically">
-                  <span className="k">auto-reject risk above</span>
+                <div className="rail-row" title={t("ruleRiskT")}>
+                  <span className="k">{t("ruleRisk")}</span>
                   <span className="v">{state.policy.maxRiskScore} / 100</span>
                 </div>
-                <div className="rail-row" title="Below this confidence the agent won't act at all">
-                  <span className="k">min confidence to act</span>
+                <div className="rail-row" title={t("ruleConfT")}>
+                  <span className="k">{t("ruleConf")}</span>
                   <span className="v">{Math.round(state.policy.minConfidence * 100)}%</span>
                 </div>
-                <div className="rail-row" title="Anything bigger than this waits for a human to approve it">
-                  <span className="k">your sign-off needed over</span>
+                <div className="rail-row" title={t("ruleSignT")}>
+                  <span className="k">{t("ruleSign")}</span>
                   <span className="v">{state.policy.approvalThresholdCspr} CSPR</span>
                 </div>
                 <div className="meter" aria-hidden>
                   <i style={{ width: `${Math.min((dataSpend / budget) * 100, 100)}%` }} />
                 </div>
-                <div className="meter-cap">
-                  evidence budget: {cspr(dataSpend)} of {cspr(budget)} CSPR used last run
-                </div>
+                <div className="meter-cap">{t("budgetUsed", { used: cspr(dataSpend), total: cspr(budget) })}</div>
               </>
             ) : (
-              <div className="empty">connecting…</div>
+              <div className="empty">{t("connecting")}</div>
             )}
           </section>
 
           <details className="panel contracts-details reveal reveal-3">
             <summary>
-              Contracts <span className="sum-hint">on-chain addresses</span>
+              {t("contracts")} <span className="sum-hint">{t("contractsHint")}</span>
             </summary>
             <div className="contract">
-              <span className="cn">TreasuryVault — holds &amp; guards the money</span>
+              <span className="cn">{t("vaultLabel")}</span>
               {state?.contracts.vault ? (
                 <a
                   className="cv"
@@ -494,11 +507,11 @@ export default function Dashboard() {
                   {state.contracts.vault.slice(0, 26)}…
                 </a>
               ) : (
-                <span className="cv off">not deployed</span>
+                <span className="cv off">{t("notDeployed")}</span>
               )}
             </div>
             <div className="contract">
-              <span className="cn">DecisionRegistry — permanent decision log</span>
+              <span className="cn">{t("registryLabel")}</span>
               {state?.contracts.registry ? (
                 <a
                   className="cv"
@@ -509,7 +522,7 @@ export default function Dashboard() {
                   {state.contracts.registry.slice(0, 26)}…
                 </a>
               ) : (
-                <span className="cv off">not deployed</span>
+                <span className="cv off">{t("notDeployed")}</span>
               )}
             </div>
           </details>
@@ -521,23 +534,20 @@ export default function Dashboard() {
             <div className="approvals">
               <div className="approvals-head">
                 <h2>
-                  Needs your sign-off <span className="badge">{pendingCount}</span>
+                  {t("needsSignOff")} <span className="badge">{pendingCount}</span>
                 </h2>
-                <p className="sub">
-                  These are above your {state.policy.approvalThresholdCspr} CSPR threshold. Approving executes the
-                  investment on-chain — for real.
-                </p>
+                <p className="sub">{t("signOffSub", { n: state.policy.approvalThresholdCspr })}</p>
               </div>
               {state.pendingApprovals.map((a) => (
                 <div className="approval" key={`${a.runId}-${a.opportunityId}`}>
                   <div className="what">
-                    Invest <b>{a.amountCspr} CSPR</b> in <b>{a.opportunityName}</b>?
+                    {tRich(t("investQ"), { amount: a.amountCspr, name: a.opportunityName })}
                     <span className="ap-meta">
-                      risk {a.riskScore}/100 · confidence {Math.round(a.confidence * 100)}%
+                      {t("riskW")} {a.riskScore}/100 · {t("confW")} {Math.round(a.confidence * 100)}%
                     </span>
                   </div>
                   <button className="approve-btn" onClick={() => approve(a)}>
-                    approve
+                    {t("approve")}
                   </button>
                 </div>
               ))}
@@ -546,13 +556,13 @@ export default function Dashboard() {
 
           <div className="opps-head">
             <div>
-              <h2>Opportunities</h2>
-              <p className="sub">Real pools, live from DefiLlama. The agent's verdict on each is stamped on the card.</p>
+              <h2>{t("opps")}</h2>
+              <p className="sub">{t("oppsSub")}</p>
             </div>
-            <span className="count">{opps.length} on the desk</span>
+            <span className="count">{t("onDesk", { n: opps.length })}</span>
           </div>
 
-          {opps.length === 0 && <div className="panel empty">Marketplace unreachable — start the data services.</div>}
+          {opps.length === 0 && <div className="panel empty">{t("marketDown")}</div>}
 
           {opps.map((o, idx) => {
             const d = latest.get(o.id);
@@ -570,13 +580,13 @@ export default function Dashboard() {
               risk === null ? "var(--faint)" : risk > 60 ? "var(--coral)" : risk > 35 ? "var(--copper)" : "var(--jade)";
             const actionLabel =
               d?.action === "ALLOCATE"
-                ? "invested"
+                ? t("actInvested")
                 : d?.action === "REJECT"
-                  ? "rejected"
+                  ? t("actRejected")
                   : d?.action === "QUEUE_FOR_APPROVAL"
-                    ? "awaiting sign-off"
+                    ? t("actAwaiting")
                     : d?.action === "HOLD"
-                      ? "on hold"
+                      ? t("actHold")
                       : null;
             return (
               <article className={`opp ${cls}`} key={o.id} style={{ animationDelay: `${Math.min(idx * 60, 360)}ms` }}>
@@ -586,8 +596,8 @@ export default function Dashboard() {
                     <h3>{o.name}</h3>
                   </div>
                   <div className="right">
-                    <span className={`apy ${apy > 30 ? "absurd" : ""}`} title="The yield this pool advertises — before the agent verifies it">
-                      advertised
+                    <span className={`apy ${apy > 30 ? "absurd" : ""}`} title={t("advertisedT")}>
+                      {t("advertised")}
                       <br />
                       <b>{apy.toFixed(1)}%</b> APY
                     </span>
@@ -596,17 +606,21 @@ export default function Dashboard() {
                 </div>
 
                 <div className="riskbar">
-                  <span>risk {risk ?? "—"}</span>
+                  <span>
+                    {t("riskW")} {risk ?? "—"}
+                  </span>
                   <span className="track" aria-hidden>
                     <i style={{ width: `${risk ?? 0}%`, background: riskColor }} />
                   </span>
-                  <span>confidence {d ? `${Math.round(d.confidence * 100)}%` : "—"}</span>
+                  <span>
+                    {t("confW")} {d ? `${Math.round(d.confidence * 100)}%` : "—"}
+                  </span>
                 </div>
 
                 <p className="why">
                   {d ? (
                     <>
-                      <span className="why-tag">agent&apos;s reasoning</span> {d.reason}
+                      <span className="why-tag">{t("reasoningTag")}</span> {d.reason}
                     </>
                   ) : (
                     o.blurb
@@ -616,16 +630,18 @@ export default function Dashboard() {
                   <p className="bought">
                     {d.dataSources.length > 0 ? (
                       <>
-                        <span className="x402" title="Paid for with a real on-chain micro-payment">x402</span>
-                        evidence bought: {d.dataSources.join(" + ")} · <b>{cspr(d.dataCostCspr)} CSPR</b>
+                        <span className="x402" title={t("x402T")}>
+                          x402
+                        </span>
+                        {t("evBought")} {d.dataSources.join(" + ")} · <b>{cspr(d.dataCostCspr)} CSPR</b>
                       </>
                     ) : (
-                      "no paid evidence needed for this one"
+                      t("noEv")
                     )}
                     {d.action === "ALLOCATE" && (
                       <>
                         {" "}
-                        — invested <b>{d.amountCspr} CSPR</b>
+                        — {t("investedAmt")} <b>{d.amountCspr} CSPR</b>
                       </>
                     )}
                   </p>
@@ -638,12 +654,13 @@ export default function Dashboard() {
         {/* right — ledger + settlements */}
         <aside>
           <section className="panel reveal reveal-3">
-            <h2>Work log — every step, in order</h2>
-            <p className="sub">What each agent did and why, newest first. Nothing is hidden.</p>
+            <h2>{t("workLog")}</h2>
+            <p className="sub">
+              {t("workLogSub")}
+              {lang !== "en" ? ` ${t("logNote")}` : ""}
+            </p>
             <div className="ledger">
-              {ledger.length === 0 && (
-                <div className="empty">Quiet for now. Run an analysis and the agents will post their work here live.</div>
-              )}
+              {ledger.length === 0 && <div className="empty">{t("workLogEmpty")}</div>}
               {[...ledger].reverse().map((e, i) => (
                 <div className="entry" key={`${e.ts}-${i}`}>
                   <time>{e.ts.slice(11, 19)}</time>
@@ -657,9 +674,9 @@ export default function Dashboard() {
           </section>
 
           <section className="panel reveal reveal-4">
-            <h2>Payment receipts — x402</h2>
-            <p className="sub">Every piece of evidence was paid for on-chain. These are the receipts.</p>
-            {payments.length === 0 && <div className="empty">No payments yet.</div>}
+            <h2>{t("receipts")}</h2>
+            <p className="sub">{t("receiptsSub")}</p>
+            {payments.length === 0 && <div className="empty">{t("noPayments")}</div>}
             {payments
               .slice(-8)
               .reverse()
@@ -673,7 +690,7 @@ export default function Dashboard() {
                       href={`https://testnet.cspr.live/deploy/${p.settlement.transaction}`}
                       target="_blank"
                       rel="noreferrer"
-                      title="View this payment on the Casper explorer"
+                      title={t("viewExplorer")}
                     >
                       {p.settlement.transaction.slice(0, 10)}…
                     </a>
@@ -689,20 +706,24 @@ export default function Dashboard() {
       {/* ----------------------------------------------------------- system */}
       {(health || metrics) && (
         <section className="panel reveal" style={{ marginTop: 22 }}>
-          <h2>System</h2>
+          <h2>{t("system")}</h2>
           <div className="health">
             <div className="h">
-              <span className="dot up" /> agent · up {fmtDur(health?.uptimeSec ?? metrics?.uptimeSec)}
+              <span className="dot up" /> {t("agentUp", { t: fmtDur(health?.uptimeSec ?? metrics?.uptimeSec) })}
             </div>
             <div className="h">
-              <span className={`dot ${health?.deps.services ? "up" : "down"}`} /> data services ·{" "}
-              {health?.deps.services ? "reachable" : "unreachable"}
+              <span className={`dot ${health?.deps.services ? "up" : "down"}`} /> {t("dataServices")} ·{" "}
+              {health?.deps.services ? t("reachable") : t("unreachable")}
             </div>
-            <div className="h">decisions posted · {metrics?.decisions ?? 0}</div>
-            <div className="h">reasoner · {metrics?.reasoner ?? (state?.llm ? "llm" : "deterministic")}</div>
+            <div className="h">
+              {t("decisionsPosted")} · {metrics?.decisions ?? 0}
+            </div>
+            <div className="h">
+              {t("reasonerW")} · {metrics?.reasoner ?? (state?.llm ? t("llm") : t("det"))}
+            </div>
             {(health?.lastError ?? metrics?.lastError) && (
               <div className="h" style={{ color: "var(--coral)" }}>
-                <span className="dot down" /> last error · {(health?.lastError ?? metrics?.lastError)?.message}
+                <span className="dot down" /> {t("lastErrorW")} · {(health?.lastError ?? metrics?.lastError)?.message}
               </div>
             )}
           </div>
@@ -710,17 +731,14 @@ export default function Dashboard() {
       )}
 
       <footer className="foot">
-        <span>
-          Atlas Agent — Casper Agentic Buildathon 2026. Contracts in Odra; evidence paid over x402; every decision
-          recorded on the Casper DecisionRegistry.
-        </span>
+        <span>{t("footerLine")}</span>
         <span className="mono">
           {state?.network ?? "casper-test"} ·{" "}
           <button
             className="intro-link"
             onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("atlas:intro"))}
           >
-            replay intro
+            {t("replayIntro")}
           </button>
         </span>
       </footer>

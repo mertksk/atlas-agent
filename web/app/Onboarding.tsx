@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "./i18n";
 
 const SEEN_KEY = "atlas_onboarded_v1";
 
@@ -63,49 +64,31 @@ function RunViz() {
   );
 }
 
-/* ----------------------------------------------------------- the steps */
-const STEPS = [
-  {
-    tag: "welcome",
-    title: "Meet Atlas",
-    body: "An autonomous treasury agent on Casper. It studies on-chain yield opportunities, decides what to fund, and records every move — live on testnet.",
-    visual: (
-      <div className="onb-hero">
-        ATLA<em>S</em>
-      </div>
-    ),
-  },
-  {
-    tag: "the desk",
-    title: "Six agents, one mandate",
-    body: "A full desk runs each cycle: Scout finds opportunities, Analyst and Risk Officer weigh them, Treasurer sizes the bet, Policy Guard checks the rules, Executor commits it on-chain.",
-    visual: <PipelineMini />,
-  },
-  {
-    tag: "x402",
-    title: "Evidence before money",
-    body: "Atlas refuses to move on a hunch. It pays for risk data over the x402 protocol — real CEP-18 settlements — before it allocates a single CSPR.",
-    visual: <X402Viz />,
-  },
-  {
-    tag: "guardrails",
-    title: "Policy enforced on-chain",
-    body: "Per-allocation caps, a daily ceiling, a recipient allowlist and human sign-off for big moves are enforced by the contract itself — then logged to the DecisionRegistry.",
-    visual: <ShieldViz />,
-  },
-  {
-    tag: "your turn",
-    title: "Watch it work",
-    body: "Hit Run analysis (add your API token first for live runs) and watch the desk light up: agents post their reasoning to the ledger as the money decisions happen.",
-    visual: <RunViz />,
-  },
-] as const;
+const VISUALS = [
+  <div className="onb-hero" key="v1">
+    ATLA<em>S</em>
+  </div>,
+  <PipelineMini key="v2" />,
+  <X402Viz key="v3" />,
+  <ShieldViz key="v4" />,
+  <RunViz key="v5" />,
+];
 
 /* ----------------------------------------------------------- component */
 export default function Onboarding() {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
-  const last = step === STEPS.length - 1;
+
+  // Steps resolve through i18n so the tour follows the selected language.
+  const steps = [
+    { tag: t("onb1Tag"), title: t("onb1Title"), body: t("onb1Body") },
+    { tag: t("onb2Tag"), title: t("onb2Title"), body: t("onb2Body") },
+    { tag: t("onb3Tag"), title: t("onb3Title"), body: t("onb3Body") },
+    { tag: t("onb4Tag"), title: t("onb4Title"), body: t("onb4Body") },
+    { tag: t("onb5Tag"), title: t("onb5Title"), body: t("onb5Body") },
+  ];
+  const last = step === steps.length - 1;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -138,22 +121,22 @@ export default function Onboarding() {
   }, [open, next, back, finish]);
 
   if (!open) return null;
-  const s = STEPS[step];
+  const s = steps[step];
 
   return (
     <div className="onb-overlay" role="dialog" aria-modal="true" aria-labelledby="onb-title" onMouseDown={(e) => e.target === e.currentTarget && finish()}>
       <div className="onb-card">
         <div className="onb-top">
           <span className="onb-tag">
-            {String(step + 1).padStart(2, "0")} / {String(STEPS.length).padStart(2, "0")} · {s.tag}
+            {String(step + 1).padStart(2, "0")} / {String(steps.length).padStart(2, "0")} · {s.tag}
           </span>
           <button className="onb-skip" onClick={finish}>
-            skip ✕
+            {t("onbSkip")}
           </button>
         </div>
 
         <div className="onb-visual" key={`v${step}`}>
-          {s.visual}
+          {VISUALS[step]}
         </div>
 
         <div className="onb-body" key={`b${step}`}>
@@ -162,17 +145,17 @@ export default function Onboarding() {
         </div>
 
         <div className="onb-dots" aria-hidden>
-          {STEPS.map((_, i) => (
+          {steps.map((_, i) => (
             <button key={i} className={`onb-dot ${i === step ? "on" : ""} ${i < step ? "past" : ""}`} onClick={() => setStep(i)} />
           ))}
         </div>
 
         <div className="onb-foot">
           <button className="onb-ghost" onClick={back} disabled={step === 0}>
-            back
+            {t("onbBack")}
           </button>
           <button className="onb-next" onClick={next} autoFocus>
-            {last ? "enter the desk →" : "next →"}
+            {last ? t("onbEnter") : t("onbNext")}
           </button>
         </div>
       </div>
