@@ -294,9 +294,10 @@ export default function Dashboard() {
     setWalletBal(null);
   };
 
-  /** Charge the usage fee from the connected wallet (user signs). Returns true on success. */
-  const payFee = async (): Promise<boolean> => {
-    if (!wallet) return false;
+  /** Charge the usage fee from the connected wallet (user signs). Returns a
+   *  one-time run credit on success (authorizes exactly one run), else null. */
+  const payFee = async (): Promise<string | null> => {
+    if (!wallet) return null;
     setNotice(null);
     try {
       setFeeStage("paying");
@@ -313,13 +314,13 @@ export default function Dashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deploy: build.deploy, publicKey: wallet, signatureHex }),
       }).then((r) => r.json());
-      if (!sub?.ok) throw new Error(sub?.error || "fee submission failed");
+      if (!sub?.ok || !sub.runCredit) throw new Error(sub?.error || "fee submission failed");
       setNotice(t("feePaid"));
-      return true;
+      return sub.runCredit as string;
     } catch (e) {
       const m = (e as Error).message;
       setNotice(m === "cancelled" ? t("feeCancelled") : `${t("feeFailed")}: ${m}`);
-      return false;
+      return null;
     } finally {
       setFeeStage("");
     }
@@ -364,13 +365,16 @@ export default function Dashboard() {
 
   const runAnalysis = async () => {
     // Monetized path: with a wallet connected, charge the usage fee first (the
-    // user signs it), then start the run. Without a wallet (local demo) the run
-    // starts directly.
+    // user signs it). The fee returns a one-time run credit that authorizes the
+    // run — a wallet user needs no bearer token. Without a wallet (local demo)
+    // the run starts directly with the token.
+    const headers: Record<string, string> = { ...authHeaders() };
     if (wallet) {
-      const paid = await payFee();
-      if (!paid) return;
+      const credit = await payFee();
+      if (!credit) return;
+      headers["X-Fee-Credit"] = credit;
     }
-    await fetch(`${AGENT}/api/run`, { method: "POST", headers: authHeaders() }).catch(() => undefined);
+    await fetch(`${AGENT}/api/run`, { method: "POST", headers }).catch(() => undefined);
     poll();
   };
   const approve = async (a: Approval) => {

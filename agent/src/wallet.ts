@@ -48,7 +48,8 @@ export async function buildFeeDeploy(fromPublicKeyHex: string): Promise<{ deploy
     transferAmount: motes,
     chainName: config.casperChainName,
   });
-  return { deploy: deploy.toJSON(), amountCspr: config.feeCspr };
+  // Deploy.toJSON is a STATIC serializer in this SDK (not an instance method).
+  return { deploy: s.Deploy.toJSON(deploy), amountCspr: config.feeCspr };
 }
 
 /**

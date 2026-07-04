@@ -56,6 +56,9 @@ const store = {
   running: false,
   pendingApprovals: [] as PendingApproval[],
   feeReceipts: [] as FeeReceipt[],
+  // One-time run credits minted by a paid usage fee (criterion 3). A wallet user
+  // has no bearer token, so a successful fee authorizes exactly one run.
+  runCredits: [] as string[],
   spentTodayCspr: 0,
   treasuryBalanceCspr: config.treasuryBalanceCspr,
   dayStamp: utcDay(),
@@ -90,6 +93,7 @@ interface PersistShape {
   runs: RunResult[];
   pendingApprovals: PendingApproval[];
   feeReceipts: FeeReceipt[];
+  runCredits: string[];
   spentTodayCspr: number;
   treasuryBalanceCspr: number;
   dayStamp: string;
@@ -103,6 +107,7 @@ function loadState(): void {
     store.runs = s.runs ?? [];
     store.pendingApprovals = s.pendingApprovals ?? [];
     store.feeReceipts = s.feeReceipts ?? [];
+    store.runCredits = s.runCredits ?? [];
     store.spentTodayCspr = s.spentTodayCspr ?? 0;
     store.treasuryBalanceCspr = s.treasuryBalanceCspr ?? config.treasuryBalanceCspr;
     store.dayStamp = s.dayStamp ?? utcDay();
@@ -125,6 +130,7 @@ function writeStateNow(): void {
       runs: store.runs,
       pendingApprovals: store.pendingApprovals,
       feeReceipts: store.feeReceipts,
+      runCredits: store.runCredits,
       spentTodayCspr: store.spentTodayCspr,
       treasuryBalanceCspr: store.treasuryBalanceCspr,
       dayStamp: store.dayStamp,
@@ -308,7 +314,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
   }
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Fee-Credit");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   next();
 });
@@ -383,7 +389,36 @@ app.get("/api/state", (_req, res) => {
   });
 });
 
-app.post("/api/run", requireAuth, (_req, res) => {
+/** Consume a one-time run credit minted by a paid usage fee. */
+function consumeRunCredit(credit: string): boolean {
+  const i = store.runCredits.indexOf(credit);
+  if (i === -1) return false;
+  store.runCredits.splice(i, 1);
+  saveState();
+  return true;
+}
+
+/** Authorize a run via the bearer token OR a paid-fee run credit (X-Fee-Credit). */
+function runAuthorized(req: express.Request): boolean {
+  if (config.apiToken) {
+    const header = req.headers.authorization ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    const a = Buffer.from(token);
+    const b = Buffer.from(config.apiToken);
+    if (a.length === b.length && timingSafeEqual(a, b)) return true;
+  } else {
+    return true; // no token configured (dev/localhost)
+  }
+  // Wallet users have no token: a valid, unconsumed fee credit authorizes one run.
+  const credit = req.headers["x-fee-credit"];
+  if (config.feeRecipientHex && typeof credit === "string" && consumeRunCredit(credit)) return true;
+  return false;
+}
+
+app.post("/api/run", (req, res) => {
+  if (!runAuthorized(req)) {
+    return res.status(401).json({ error: "unauthorized: provide a bearer token or pay the usage fee" });
+  }
   if (store.running) return res.status(409).json({ error: "a run is already in progress" });
   executeRun().catch((err) => {
     recordError(`run failed: ${String(err)}`);
@@ -556,13 +591,17 @@ app.post("/api/wallet/fee/submit", async (req, res) => {
     };
     store.feeReceipts.push(receipt);
     if (store.feeReceipts.length > 200) store.feeReceipts.splice(0, store.feeReceipts.length - 200);
+    // Mint a one-time run credit so this paying wallet (no bearer token) can run once.
+    const runCredit = deployHash || `${receipt.at}:${body.publicKey}`;
+    store.runCredits.push(runCredit);
+    if (store.runCredits.length > 200) store.runCredits.splice(0, store.runCredits.length - 200);
     store.ledger.push({
       ts: receipt.at!,
       agent: "system",
       message: `Usage fee received: ${config.feeCspr} CSPR from ${body.publicKey.slice(0, 10)}… (deploy ${deployHash.slice(0, 10)}…).`,
     });
     flushState();
-    res.json({ ok: true, deployHash });
+    res.json({ ok: true, deployHash, runCredit });
   } catch (err) {
     recordError(`fee submit failed: ${String(err)}`);
     res.status(502).json({ error: String(err instanceof Error ? err.message : err) });
