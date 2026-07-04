@@ -220,6 +220,76 @@ button { font: inherit; }
 .token-input:focus { border-color: var(--copper); box-shadow: 0 0 0 3px var(--copper-glow); }
 .token-input::placeholder { color: var(--faint); text-transform: uppercase; }
 
+/* wallet connect (non-custodial) */
+.wallet-btn {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--jade);
+  background: rgba(95, 207, 159, 0.08);
+  border: 1px solid rgba(95, 207, 159, 0.45);
+  border-radius: 999px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: border-color 160ms, box-shadow 160ms, transform 140ms, background 160ms;
+}
+.wallet-btn:hover:not(:disabled) { background: rgba(95, 207, 159, 0.16); box-shadow: 0 0 0 3px rgba(95, 207, 159, 0.14); transform: translateY(-1px); }
+.wallet-btn:disabled { opacity: 0.5; cursor: default; }
+.chip.wallet { border-color: rgba(95, 207, 159, 0.45); color: var(--jade); font-family: var(--font-mono); }
+.chip.wallet .wbal { color: var(--copper); font-weight: 700; }
+
+.custody-note {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--faint);
+  max-width: 42ch;
+}
+
+/* transient status line under the masthead */
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0 0;
+  padding: 10px 16px;
+  border: 1px solid rgba(95, 207, 159, 0.4);
+  border-radius: 12px;
+  background: rgba(95, 207, 159, 0.06);
+  color: var(--text);
+  font-size: 13px;
+}
+.notice-x {
+  background: none;
+  border: none;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+}
+.notice-x:hover { color: var(--text); }
+
+/* work-log header with a raw-log download */
+.worklog-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.log-dl {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: border-color 160ms, color 160ms;
+}
+.log-dl:hover:not(:disabled) { border-color: var(--copper); color: var(--copper); }
+.log-dl:disabled { opacity: 0.4; cursor: default; }
+
 .run-btn {
   position: relative;
   font-family: var(--font-mono);

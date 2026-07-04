@@ -75,6 +75,15 @@ export const config = {
   // X402_PAYEE format. Defaults to the owner/deployer account.
   x402WusdcPayee:
     process.env.X402_WUSDC_PAYEE ?? "account-hash-a54a5bcda6707361564fab8dc3bff790133c4e1fc8caf2bf2219e49593aa1ec4",
+  // --- Non-custodial wallet flow (monetization, criterion 3) ---
+  // The connected Casper Wallet pays a small usage fee per analysis run to a fee
+  // wallet WE designate, signing it themselves (server never holds the user key).
+  // FEE_RECIPIENT_HEX must be a Casper PUBLIC KEY hex (01…/02…), not an account
+  // hash — the native transfer builder needs a public key on both ends.
+  feeRecipientHex: process.env.FEE_RECIPIENT_HEX ?? "0177aedd327559f049bc0d7b8fa8d2ee7f46ebca094661fe31f3ad4f5290772fdc",
+  feeCspr: num("FEE_CSPR", process.env.FEE_CSPR, 1),
+  casperRpcUrl: process.env.CASPER_RPC_URL ?? "https://node.testnet.casper.network/rpc",
+  casperChainName: process.env.CASPER_CHAIN_NAME ?? "casper-test",
   // Bearer token guarding the state-changing API endpoints (run, approve).
   // Unset => those endpoints are unauthenticated (dev only).
   apiToken: process.env.AGENT_API_TOKEN,

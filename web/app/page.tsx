@@ -2,8 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Onboarding from "./Onboarding";
-import { downloadReport } from "./report";
+import { downloadReport, downloadLogs } from "./report";
 import { useI18n, LANGS, type Lang, type StrKey } from "./i18n";
+import {
+  connectWallet,
+  currentKey,
+  disconnectWallet,
+  walletBalanceCspr,
+  subscribeWallet,
+  signDeploy,
+  shortKey,
+  walletInstalled,
+} from "./wallet";
 
 const AGENT = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:4030";
 const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_AGENT_API_TOKEN ?? "";
@@ -196,6 +206,13 @@ export default function Dashboard() {
   const [offline, setOffline] = useState(false);
   const [token, setToken] = useState("");
   const [editingToken, setEditingToken] = useState(false);
+  // --- wallet (non-custodial) ---
+  const [wallet, setWallet] = useState<string | null>(null);
+  const [walletBal, setWalletBal] = useState<number | null>(null);
+  const [walletBusy, setWalletBusy] = useState(false);
+  const [feeStage, setFeeStage] = useState<"" | "paying" | "submitting">("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [feeCspr, setFeeCspr] = useState(1);
   const cursor = useRef(0);
   // id -> human name, accumulated across polls so old ledger lines stay readable
   const names = useRef(new Map<string, string>());
@@ -217,6 +234,96 @@ export default function Dashboard() {
     if (typeof window !== "undefined") window.localStorage.setItem("atlas_token", v);
   };
   const authHeaders = (): Record<string, string> => (token ? { Authorization: `Bearer ${token}` } : {});
+
+  // ---- wallet: restore an existing connection, subscribe to key/disconnect
+  // events, and learn the server's fee terms. Non-custodial: we only read the
+  // public key + balance; the wallet holds the key and signs every move.
+  useEffect(() => {
+    currentKey().then((k) => k && setWallet(k)).catch(() => undefined);
+    fetch(`${AGENT}/api/wallet/fee`)
+      .then((r) => r.json())
+      .then((f) => typeof f?.feeCspr === "number" && setFeeCspr(f.feeCspr))
+      .catch(() => undefined);
+    return subscribeWallet({
+      onKey: (k) => {
+        setWallet(k);
+        setNotice(null);
+      },
+      onDisconnect: () => {
+        setWallet(null);
+        setWalletBal(null);
+      },
+    });
+  }, []);
+
+  // ---- wallet balance: this is the treasury under management (criterion 6).
+  useEffect(() => {
+    if (!wallet) {
+      setWalletBal(null);
+      return;
+    }
+    let alive = true;
+    const load = () => walletBalanceCspr(wallet).then((b) => alive && setWalletBal(b)).catch(() => undefined);
+    load();
+    const id = setInterval(load, 15000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [wallet]);
+
+  const onConnect = async () => {
+    setNotice(null);
+    setWalletBusy(true);
+    try {
+      if (!walletInstalled()) {
+        setNotice(t("walletInstall"));
+        return;
+      }
+      setWallet(await connectWallet());
+    } catch (e) {
+      setNotice((e as Error).message === "rejected" ? t("walletRejected") : t("walletInstall"));
+    } finally {
+      setWalletBusy(false);
+    }
+  };
+
+  const onDisconnect = async () => {
+    await disconnectWallet().catch(() => undefined);
+    setWallet(null);
+    setWalletBal(null);
+  };
+
+  /** Charge the usage fee from the connected wallet (user signs). Returns true on success. */
+  const payFee = async (): Promise<boolean> => {
+    if (!wallet) return false;
+    setNotice(null);
+    try {
+      setFeeStage("paying");
+      const build = await fetch(`${AGENT}/api/wallet/fee/build`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: wallet }),
+      }).then((r) => r.json());
+      if (!build?.deploy) throw new Error(build?.error || "could not build fee deploy");
+      const signatureHex = await signDeploy(JSON.stringify(build.deploy), wallet);
+      setFeeStage("submitting");
+      const sub = await fetch(`${AGENT}/api/wallet/fee/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deploy: build.deploy, publicKey: wallet, signatureHex }),
+      }).then((r) => r.json());
+      if (!sub?.ok) throw new Error(sub?.error || "fee submission failed");
+      setNotice(t("feePaid"));
+      return true;
+    } catch (e) {
+      const m = (e as Error).message;
+      setNotice(m === "cancelled" ? t("feeCancelled") : `${t("feeFailed")}: ${m}`);
+      return false;
+    } finally {
+      setFeeStage("");
+    }
+  };
 
   const poll = useCallback(async () => {
     try {
@@ -256,6 +363,13 @@ export default function Dashboard() {
   }, [poll]);
 
   const runAnalysis = async () => {
+    // Monetized path: with a wallet connected, charge the usage fee first (the
+    // user signs it), then start the run. Without a wallet (local demo) the run
+    // starts directly.
+    if (wallet) {
+      const paid = await payFee();
+      if (!paid) return;
+    }
     await fetch(`${AGENT}/api/run`, { method: "POST", headers: authHeaders() }).catch(() => undefined);
     poll();
   };
@@ -271,7 +385,11 @@ export default function Dashboard() {
 
   const dataSpend = state?.lastRunDataCostCspr ?? 0;
   const budget = state?.policy.dataBudgetCspr ?? 1;
-  const treasury = useCountUp(state?.treasuryBalanceCspr ?? 0);
+  // Treasury under management = the connected wallet's own CSPR (non-custodial,
+  // criterion 6). Falls back to the agent vault mirror when no wallet is linked.
+  const walletLinked = wallet != null;
+  const treasuryTarget = walletLinked && walletBal != null ? walletBal : state?.treasuryBalanceCspr ?? 0;
+  const treasury = useCountUp(treasuryTarget);
   const pipe = pipelineState(ledger, state?.running ?? false);
   const activeRole = ROLES.find((r) => r.key === pipe.current);
   const activeStep = activeRole ? ROLES.indexOf(activeRole) + 1 : 0;
@@ -326,44 +444,76 @@ export default function Dashboard() {
           >
             ⤓ {t("report")}
           </button>
-          {token && !editingToken ? (
-            <span className="chip authed" title={t("authedT")}>
-              <i className="dot" /> {t("authed")}
-              <button className="chip-link" onClick={() => setEditingToken(true)} title={t("apiToken")}>
-                {t("change")}
+          {wallet ? (
+            <span className="chip wallet" title={t("nonCustodialNote")}>
+              <i className="dot" /> 🔑 {shortKey(wallet)}
+              {walletBal != null && <b className="wbal">· {cspr(walletBal)} CSPR</b>}
+              <button className="chip-link" onClick={onDisconnect} title={t("walletDisconnect")}>
+                {t("walletDisconnect")}
               </button>
             </span>
           ) : (
-            <input
-              className="token-input"
-              type="password"
-              placeholder={t("apiToken")}
-              value={token}
-              autoFocus={editingToken}
-              onChange={(e) => saveToken(e.target.value)}
-              onBlur={() => setEditingToken(false)}
-              title={t("tokenT")}
-            />
+            <button className="wallet-btn" onClick={onConnect} disabled={walletBusy} title={t("walletT")}>
+              {walletBusy ? t("walletConnecting") : `🔗 ${t("walletConnect")}`}
+            </button>
           )}
+          {/* API token is only needed for the local/demo (no-wallet) path. */}
+          {!wallet &&
+            (token && !editingToken ? (
+              <span className="chip authed" title={t("authedT")}>
+                <i className="dot" /> {t("authed")}
+                <button className="chip-link" onClick={() => setEditingToken(true)} title={t("apiToken")}>
+                  {t("change")}
+                </button>
+              </span>
+            ) : (
+              <input
+                className="token-input"
+                type="password"
+                placeholder={t("apiToken")}
+                value={token}
+                autoFocus={editingToken}
+                onChange={(e) => saveToken(e.target.value)}
+                onBlur={() => setEditingToken(false)}
+                title={t("tokenT")}
+              />
+            ))}
           <button
-            className={`run-btn ${state?.running ? "working" : ""}`}
+            className={`run-btn ${state?.running || feeStage ? "working" : ""}`}
             onClick={runAnalysis}
-            disabled={!state || state.running}
+            disabled={!state || state.running || feeStage !== "" || walletBusy}
             title={t("runT")}
           >
-            {state?.running ? t("running") : t("run")}
+            {feeStage === "paying"
+              ? t("feePaying")
+              : feeStage === "submitting"
+                ? t("feeSubmitting")
+                : state?.running
+                  ? t("running")
+                  : wallet
+                    ? t("feePayRun", { amount: feeCspr })
+                    : t("run")}
           </button>
         </div>
       </header>
+      {notice && (
+        <div className="notice" role="status">
+          {notice}
+          <button className="notice-x" onClick={() => setNotice(null)} aria-label="dismiss">
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* ------------------------------------------------------------- hero */}
       <div className="hero">
         <section className="vault reveal reveal-1">
-          <span className="label">{t("treasury")}</span>
+          <span className="label">{walletLinked ? t("treasuryWallet") : t("treasury")}</span>
           <div className="figure">
-            {state ? cspr(treasury) : "—"}
+            {walletLinked ? (walletBal != null ? cspr(treasury) : "…") : state ? cspr(treasury) : "—"}
             <span className="unit">CSPR</span>
           </div>
+          {walletLinked && <p className="custody-note">{t("nonCustodialNote")}</p>}
           <div className="substats">
             <div>
               <span className="n">{state ? cspr(state.spentTodayCspr) : "—"}</span>
@@ -654,7 +804,17 @@ export default function Dashboard() {
         {/* right — ledger + settlements */}
         <aside>
           <section className="panel reveal reveal-3">
-            <h2>{t("workLog")}</h2>
+            <div className="worklog-head">
+              <h2>{t("workLog")}</h2>
+              <button
+                className="log-dl"
+                onClick={() => downloadLogs({ state, opps, decisions, payments, ledger })}
+                disabled={ledger.length === 0 && decisions.length === 0}
+                title={t("downloadLogT")}
+              >
+                ⤓ {t("downloadLog")}
+              </button>
+            </div>
             <p className="sub">
               {t("workLogSub")}
               {lang !== "en" ? ` ${t("logNote")}` : ""}

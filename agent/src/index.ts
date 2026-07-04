@@ -26,7 +26,17 @@ import { config, defaultPolicy, validateConfig, ConfigError } from "./config.js"
 import { runPipeline } from "./orchestrator.js";
 import { reasonerLabel } from "./reasoning.js";
 import { executeAllocationOnChain, recordDecisionOnChain, swapCsprForWusdc, vaultStatus, type OnChainOutcome } from "./chain.js";
+import { feeInfo, buildFeeDeploy, submitSignedDeploy } from "./wallet.js";
 import { motesToCspr, type LedgerEntry, type RunResult } from "./types.js";
+
+/** A usage-fee receipt: the connected wallet's signed CSPR transfer to the fee wallet. */
+interface FeeReceipt {
+  resource?: string;
+  amount?: string;
+  at?: string;
+  from?: string;
+  settlement?: { transaction?: string; mode?: string };
+}
 
 interface PendingApproval {
   runId: string;
@@ -45,6 +55,7 @@ const store = {
   runs: [] as RunResult[],
   running: false,
   pendingApprovals: [] as PendingApproval[],
+  feeReceipts: [] as FeeReceipt[],
   spentTodayCspr: 0,
   treasuryBalanceCspr: config.treasuryBalanceCspr,
   dayStamp: utcDay(),
@@ -78,6 +89,7 @@ interface PersistShape {
   ledger: LedgerEntry[];
   runs: RunResult[];
   pendingApprovals: PendingApproval[];
+  feeReceipts: FeeReceipt[];
   spentTodayCspr: number;
   treasuryBalanceCspr: number;
   dayStamp: string;
@@ -90,6 +102,7 @@ function loadState(): void {
     store.ledger = s.ledger ?? [];
     store.runs = s.runs ?? [];
     store.pendingApprovals = s.pendingApprovals ?? [];
+    store.feeReceipts = s.feeReceipts ?? [];
     store.spentTodayCspr = s.spentTodayCspr ?? 0;
     store.treasuryBalanceCspr = s.treasuryBalanceCspr ?? config.treasuryBalanceCspr;
     store.dayStamp = s.dayStamp ?? utcDay();
@@ -111,6 +124,7 @@ function writeStateNow(): void {
       ledger: store.ledger,
       runs: store.runs,
       pendingApprovals: store.pendingApprovals,
+      feeReceipts: store.feeReceipts,
       spentTodayCspr: store.spentTodayCspr,
       treasuryBalanceCspr: store.treasuryBalanceCspr,
       dayStamp: store.dayStamp,
@@ -494,11 +508,64 @@ app.get("/api/opportunities", async (_req, res) => {
 });
 
 app.get("/api/payments", async (_req, res) => {
+  let upstream: unknown[] = [];
   try {
     const r = await fetch(`${config.servicesUrl}/payments`);
-    res.json(r.ok ? await r.json() : []);
+    if (r.ok) upstream = (await r.json()) as unknown[];
   } catch {
-    res.json([]);
+    upstream = [];
+  }
+  // Merge the wallet usage-fee receipts (criterion 3) with the x402 data receipts.
+  res.json([...upstream, ...store.feeReceipts]);
+});
+
+// --------------------------------------------------- non-custodial wallet flow
+// The connected Casper Wallet signs every move; the server only builds the
+// unsigned deploy and forwards the user's signature. These endpoints are NOT
+// bearer-guarded: building a deploy is harmless, and a submitted deploy can only
+// move exactly what the user signed — the fee itself is the run gate.
+
+// Fee terms (amount + fee wallet) so the UI can show the user what they'll pay.
+app.get("/api/wallet/fee", (_req, res) => res.json(feeInfo()));
+
+// Build the unsigned usage-fee deploy for the connected wallet to sign.
+app.post("/api/wallet/fee/build", async (req, res) => {
+  try {
+    const from = String((req.body as { from?: string } | undefined)?.from ?? "");
+    const built = await buildFeeDeploy(from);
+    res.json(built);
+  } catch (err) {
+    res.status(400).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+// Attach the wallet's signature and submit to the node; record a receipt.
+app.post("/api/wallet/fee/submit", async (req, res) => {
+  const body = req.body as { deploy?: unknown; publicKey?: string; signatureHex?: string } | undefined;
+  if (!body?.deploy || !body.publicKey || !body.signatureHex) {
+    return res.status(400).json({ error: "deploy, publicKey and signatureHex are required" });
+  }
+  try {
+    const { deployHash } = await submitSignedDeploy(body.deploy, body.publicKey, body.signatureHex);
+    const receipt: FeeReceipt = {
+      resource: "/api/run",
+      amount: BigInt(Math.round(config.feeCspr * 1e9)).toString(),
+      at: new Date().toISOString(),
+      from: body.publicKey,
+      settlement: { transaction: deployHash, mode: "cspr" },
+    };
+    store.feeReceipts.push(receipt);
+    if (store.feeReceipts.length > 200) store.feeReceipts.splice(0, store.feeReceipts.length - 200);
+    store.ledger.push({
+      ts: receipt.at!,
+      agent: "system",
+      message: `Usage fee received: ${config.feeCspr} CSPR from ${body.publicKey.slice(0, 10)}… (deploy ${deployHash.slice(0, 10)}…).`,
+    });
+    flushState();
+    res.json({ ok: true, deployHash });
+  } catch (err) {
+    recordError(`fee submit failed: ${String(err)}`);
+    res.status(502).json({ error: String(err instanceof Error ? err.message : err) });
   }
 });
 
