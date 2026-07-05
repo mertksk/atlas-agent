@@ -41,7 +41,14 @@ export async function buildFeeDeploy(fromPublicKeyHex: string): Promise<{ deploy
   if (!config.feeRecipientHex) throw new Error("FEE_RECIPIENT_HEX not configured on the server");
   if (!/^0[12][0-9a-f]{64,}$/i.test(fromPublicKeyHex)) throw new Error("from is not a valid Casper public key hex");
   const s = await sdk();
-  const motes = BigInt(Math.round(config.feeCspr * 1e9)).toString();
+  // Enforce the on-chain native-transfer minimum (chainspec: 2.5 CSPR) so a
+  // misconfigured fee fails here with a clear message instead of a node -32008.
+  const NATIVE_TRANSFER_MIN_MOTES = 2_500_000_000n;
+  const motesBig = BigInt(Math.round(config.feeCspr * 1e9));
+  if (motesBig < NATIVE_TRANSFER_MIN_MOTES) {
+    throw new Error(`FEE_CSPR=${config.feeCspr} is below the Casper native-transfer minimum of 2.5 CSPR`);
+  }
+  const motes = motesBig.toString();
   const deploy = s.makeCsprTransferDeploy({
     senderPublicKeyHex: fromPublicKeyHex,
     recipientPublicKeyHex: config.feeRecipientHex,

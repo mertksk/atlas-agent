@@ -81,7 +81,10 @@ export const config = {
   // FEE_RECIPIENT_HEX must be a Casper PUBLIC KEY hex (01…/02…), not an account
   // hash — the native transfer builder needs a public key on both ends.
   feeRecipientHex: process.env.FEE_RECIPIENT_HEX ?? "0177aedd327559f049bc0d7b8fa8d2ee7f46ebca094661fe31f3ad4f5290772fdc",
-  feeCspr: num("FEE_CSPR", process.env.FEE_CSPR, 1),
+  // The Casper chainspec sets native_transfer_minimum_motes = 2_500_000_000 (2.5
+  // CSPR): a native transfer below that is rejected by the node with -32008. So
+  // the usage fee must be >= 2.5 CSPR (enforced in wallet.buildFeeDeploy).
+  feeCspr: num("FEE_CSPR", process.env.FEE_CSPR, 2.5),
   casperRpcUrl: process.env.CASPER_RPC_URL ?? "https://node.testnet.casper.network/rpc",
   casperChainName: process.env.CASPER_CHAIN_NAME ?? "casper-test",
   // Bearer token guarding the state-changing API endpoints (run, approve).
