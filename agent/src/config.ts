@@ -87,6 +87,14 @@ export const config = {
   feeCspr: num("FEE_CSPR", process.env.FEE_CSPR, 2.5),
   casperRpcUrl: process.env.CASPER_RPC_URL ?? "https://node.testnet.casper.network/rpc",
   casperChainName: process.env.CASPER_CHAIN_NAME ?? "casper-test",
+  // Non-custodial execution: the agent does NOT move money or write to chain with
+  // its own key. Instead, every ALLOCATE becomes a user-signed CSPR transfer (the
+  // connected wallet signs it, its own CSPR moves). Default on for the dApp.
+  nonCustodial: bool(process.env.NON_CUSTODIAL, true),
+  // Where a user-signed allocation lands (the managed strategy account). MUST be
+  // a public key hex (01…/02…) — the native transfer builder needs one.
+  allocationRecipientHex:
+    process.env.ALLOCATION_RECIPIENT_HEX ?? "0177aedd327559f049bc0d7b8fa8d2ee7f46ebca094661fe31f3ad4f5290772fdc",
   // Bearer token guarding the state-changing API endpoints (run, approve).
   // Unset => those endpoints are unauthenticated (dev only).
   apiToken: process.env.AGENT_API_TOKEN,

@@ -26,7 +26,7 @@ import { config, defaultPolicy, validateConfig, ConfigError } from "./config.js"
 import { runPipeline } from "./orchestrator.js";
 import { reasonerLabel } from "./reasoning.js";
 import { executeAllocationOnChain, recordDecisionOnChain, swapCsprForWusdc, vaultStatus, type OnChainOutcome } from "./chain.js";
-import { feeInfo, buildFeeDeploy, submitSignedDeploy } from "./wallet.js";
+import { feeInfo, buildFeeDeploy, buildTransferDeploy, submitSignedDeploy } from "./wallet.js";
 import { motesToCspr, type LedgerEntry, type RunResult } from "./types.js";
 
 /** A usage-fee receipt: the connected wallet's signed CSPR transfer to the fee wallet. */
@@ -50,11 +50,24 @@ interface PendingApproval {
   queuedAt: string;
 }
 
+/** A non-custodial allocation awaiting the connected wallet's signature. */
+interface PendingAllocation {
+  runId: string;
+  opportunityId: string;
+  opportunityName: string;
+  amountCspr: number;
+  riskScore: number;
+  confidence: number;
+  reason: string;
+  queuedAt: string;
+}
+
 const store = {
   ledger: [] as LedgerEntry[],
   runs: [] as RunResult[],
   running: false,
   pendingApprovals: [] as PendingApproval[],
+  pendingAllocations: [] as PendingAllocation[],
   feeReceipts: [] as FeeReceipt[],
   // One-time run credits minted by a paid usage fee (criterion 3). A wallet user
   // has no bearer token, so a successful fee authorizes exactly one run.
@@ -92,6 +105,7 @@ interface PersistShape {
   ledger: LedgerEntry[];
   runs: RunResult[];
   pendingApprovals: PendingApproval[];
+  pendingAllocations: PendingAllocation[];
   feeReceipts: FeeReceipt[];
   runCredits: string[];
   spentTodayCspr: number;
@@ -106,6 +120,7 @@ function loadState(): void {
     store.ledger = s.ledger ?? [];
     store.runs = s.runs ?? [];
     store.pendingApprovals = s.pendingApprovals ?? [];
+    store.pendingAllocations = s.pendingAllocations ?? [];
     store.feeReceipts = s.feeReceipts ?? [];
     store.runCredits = s.runCredits ?? [];
     store.spentTodayCspr = s.spentTodayCspr ?? 0;
@@ -129,6 +144,7 @@ function writeStateNow(): void {
       ledger: store.ledger,
       runs: store.runs,
       pendingApprovals: store.pendingApprovals,
+      pendingAllocations: store.pendingAllocations,
       feeReceipts: store.feeReceipts,
       runCredits: store.runCredits,
       spentTodayCspr: store.spentTodayCspr,
@@ -205,10 +221,27 @@ async function executeRun(): Promise<RunResult> {
     const opps = await fetchOpportunities();
     for (const d of result.decisions) {
       if (d.verdict.finalAction === "ALLOCATE") {
-        const moved = config.dryRun || d.onChain?.executed === true;
-        if (moved) {
-          store.spentTodayCspr += d.decision.recommendedAmountCspr;
-          store.treasuryBalanceCspr -= d.decision.recommendedAmountCspr;
+        if (config.nonCustodial) {
+          // Non-custodial: the user signs the CSPR transfer, so we don't debit the
+          // local mirror here — we surface a pending allocation for them to sign.
+          const opp = opps.find((o) => o.id === d.decision.opportunityId);
+          store.pendingAllocations = store.pendingAllocations.filter((a) => a.opportunityId !== d.decision.opportunityId);
+          store.pendingAllocations.push({
+            runId: result.runId,
+            opportunityId: d.decision.opportunityId,
+            opportunityName: opp?.name ?? d.decision.opportunityId,
+            amountCspr: d.decision.recommendedAmountCspr,
+            riskScore: d.decision.riskScore,
+            confidence: d.decision.confidence,
+            reason: d.decision.reason,
+            queuedAt: new Date().toISOString(),
+          });
+        } else {
+          const moved = config.dryRun || d.onChain?.executed === true;
+          if (moved) {
+            store.spentTodayCspr += d.decision.recommendedAmountCspr;
+            store.treasuryBalanceCspr -= d.decision.recommendedAmountCspr;
+          }
         }
       }
       if (d.verdict.finalAction === "QUEUE_FOR_APPROVAL") {
@@ -383,6 +416,8 @@ app.get("/api/state", (_req, res) => {
     lastRunId: last?.runId ?? null,
     lastRunDataCostCspr: last ? motesToCspr(last.totalDataCostMotes) : 0,
     pendingApprovals: store.pendingApprovals,
+    pendingAllocations: store.pendingAllocations,
+    nonCustodial: config.nonCustodial,
     llm: Boolean(config.openrouterApiKey || config.anthropicApiKey),
     reasoner: reasonerLabel(),
     contracts: { vault: config.vaultAddress ?? null, registry: config.registryAddress ?? null },
@@ -586,6 +621,61 @@ app.post("/api/wallet/fee/build", async (req, res) => {
     res.json(built);
   } catch (err) {
     res.status(400).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+// Build the unsigned CSPR transfer for a pending allocation (user signs it).
+app.post("/api/wallet/allocate/build", async (req, res) => {
+  const body = req.body as { from?: string; opportunityId?: string } | undefined;
+  const from = String(body?.from ?? "");
+  const oppId = String(body?.opportunityId ?? "");
+  const pending = store.pendingAllocations.find((a) => a.opportunityId === oppId);
+  if (!pending) return res.status(404).json({ error: "no pending allocation for that opportunity" });
+  try {
+    const built = await buildTransferDeploy(from, config.allocationRecipientHex, pending.amountCspr);
+    res.json({ ...built, opportunityName: pending.opportunityName });
+  } catch (err) {
+    res.status(400).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+// Attach the wallet's signature, submit the allocation transfer, record it.
+app.post("/api/wallet/allocate/submit", async (req, res) => {
+  const body = req.body as
+    | { deploy?: unknown; publicKey?: string; signatureHex?: string; opportunityId?: string }
+    | undefined;
+  if (!body?.deploy || !body.publicKey || !body.signatureHex || !body.opportunityId) {
+    return res.status(400).json({ error: "deploy, publicKey, signatureHex and opportunityId are required" });
+  }
+  const idx = store.pendingAllocations.findIndex((a) => a.opportunityId === body.opportunityId);
+  if (idx === -1) return res.status(404).json({ error: "no pending allocation for that opportunity" });
+  const alloc = store.pendingAllocations[idx];
+  try {
+    const { deployHash } = await submitSignedDeploy(body.deploy, body.publicKey, body.signatureHex);
+    // Money moved (user-signed) — remove the pending allocation and record it.
+    store.pendingAllocations.splice(idx, 1);
+    store.spentTodayCspr += alloc.amountCspr;
+    store.feeReceipts.push({
+      resource: "/api/allocate",
+      amount: BigInt(Math.round(alloc.amountCspr * 1e9)).toString(),
+      at: new Date().toISOString(),
+      from: body.publicKey,
+      settlement: { transaction: deployHash, mode: "cspr" },
+    });
+    // Reflect the allocation in the run's decision record (for the report/log).
+    const run = store.runs.find((r) => r.runId === alloc.runId);
+    const slot = run?.decisions.find((d) => d.decision.opportunityId === alloc.opportunityId);
+    if (slot) slot.onChain = { ...(slot.onChain ?? { recorded: false, dryRun: false }), executed: true };
+    store.ledger.push({
+      ts: new Date().toISOString(),
+      agent: "executor",
+      message: `${alloc.opportunityId}: you invested ${alloc.amountCspr} CSPR (wallet-signed, non-custodial) — deploy ${deployHash.slice(0, 10)}… on Casper Testnet.`,
+    });
+    flushState();
+    res.json({ ok: true, deployHash });
+  } catch (err) {
+    recordError(`allocation submit failed: ${String(err)}`);
+    res.status(502).json({ error: String(err instanceof Error ? err.message : err) });
   }
 });
 

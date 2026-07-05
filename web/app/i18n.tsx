@@ -170,6 +170,14 @@ const en = {
   feeReceipt: "usage fee",
   downloadLog: "raw log",
   downloadLogT: "Download the full run log as JSON — every decision, risk analysis and settlement, exactly as recorded",
+  // non-custodial allocation (user signs the investment)
+  investNeedsSig: "Ready for your signature",
+  investNeedsSigSub: "The agent recommends these. Nothing moves until you sign — Atlas is non-custodial, so your CSPR leaves your wallet only with your signature.",
+  investSign: "sign & invest {amount} CSPR",
+  investSignT: "Sign a CSPR transfer from your wallet to invest — you approve it in your wallet",
+  investDone: "Invested {amount} CSPR in {name} — signed by you.",
+  investCancelled: "you cancelled — nothing was invested",
+  investFailed: "investment failed",
 };
 export type StrKey = keyof typeof en;
 type Dict = Partial<Record<StrKey, string>>;
@@ -262,6 +270,13 @@ const tr: Dict = {
   feeCancelled: "ücreti iptal ettin — koşu başlamadı", feeReceipt: "kullanım ücreti",
   downloadLog: "ham günlük",
   downloadLogT: "Tüm koşu günlüğünü JSON olarak indir — her karar, risk analizi ve ödeme, kaydedildiği gibi",
+  investNeedsSig: "İmzanı bekliyor",
+  investNeedsSigSub: "Ajan bunları öneriyor. Sen imzalamadan hiçbir şey hareket etmez — Atlas emanetsizdir, CSPR'ın cüzdanından yalnızca senin imzanla çıkar.",
+  investSign: "imzala ve {amount} CSPR yatır",
+  investSignT: "Yatırım için cüzdanından bir CSPR transferi imzala — onayı cüzdanında verirsin",
+  investDone: "{name} içine {amount} CSPR yatırıldı — senin imzanla.",
+  investCancelled: "iptal ettin — hiçbir şey yatırılmadı",
+  investFailed: "yatırım başarısız",
 };
 
 const es: Dict = {

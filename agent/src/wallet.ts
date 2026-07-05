@@ -36,27 +36,35 @@ export function feeInfo(): { feeRecipientHex: string; feeCspr: number; chainName
   };
 }
 
-/** Build the unsigned usage-fee deploy: `from` (the connected wallet) → fee wallet. */
-export async function buildFeeDeploy(fromPublicKeyHex: string): Promise<{ deploy: unknown; amountCspr: number }> {
-  if (!config.feeRecipientHex) throw new Error("FEE_RECIPIENT_HEX not configured on the server");
+const NATIVE_TRANSFER_MIN_MOTES = 2_500_000_000n; // chainspec native_transfer_minimum_motes (2.5 CSPR)
+
+/** Build an unsigned native CSPR transfer deploy from a wallet to a recipient. */
+export async function buildTransferDeploy(
+  fromPublicKeyHex: string,
+  toPublicKeyHex: string,
+  amountCspr: number,
+): Promise<{ deploy: unknown; amountCspr: number }> {
   if (!/^0[12][0-9a-f]{64,}$/i.test(fromPublicKeyHex)) throw new Error("from is not a valid Casper public key hex");
+  if (!/^0[12][0-9a-f]{64,}$/i.test(toPublicKeyHex)) throw new Error("recipient is not a valid Casper public key hex");
   const s = await sdk();
-  // Enforce the on-chain native-transfer minimum (chainspec: 2.5 CSPR) so a
-  // misconfigured fee fails here with a clear message instead of a node -32008.
-  const NATIVE_TRANSFER_MIN_MOTES = 2_500_000_000n;
-  const motesBig = BigInt(Math.round(config.feeCspr * 1e9));
+  const motesBig = BigInt(Math.round(amountCspr * 1e9));
   if (motesBig < NATIVE_TRANSFER_MIN_MOTES) {
-    throw new Error(`FEE_CSPR=${config.feeCspr} is below the Casper native-transfer minimum of 2.5 CSPR`);
+    throw new Error(`amount ${amountCspr} CSPR is below the Casper native-transfer minimum of 2.5 CSPR`);
   }
-  const motes = motesBig.toString();
   const deploy = s.makeCsprTransferDeploy({
     senderPublicKeyHex: fromPublicKeyHex,
-    recipientPublicKeyHex: config.feeRecipientHex,
-    transferAmount: motes,
+    recipientPublicKeyHex: toPublicKeyHex,
+    transferAmount: motesBig.toString(),
     chainName: config.casperChainName,
   });
   // Deploy.toJSON is a STATIC serializer in this SDK (not an instance method).
-  return { deploy: s.Deploy.toJSON(deploy), amountCspr: config.feeCspr };
+  return { deploy: s.Deploy.toJSON(deploy), amountCspr };
+}
+
+/** Build the unsigned usage-fee deploy: `from` (the connected wallet) → fee wallet. */
+export async function buildFeeDeploy(fromPublicKeyHex: string): Promise<{ deploy: unknown; amountCspr: number }> {
+  if (!config.feeRecipientHex) throw new Error("FEE_RECIPIENT_HEX not configured on the server");
+  return buildTransferDeploy(fromPublicKeyHex, config.feeRecipientHex, config.feeCspr);
 }
 
 /**

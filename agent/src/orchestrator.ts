@@ -272,6 +272,21 @@ export async function runPipeline(opts: OrchestratorOptions = {}): Promise<RunRe
 
     // ---------------------------------------------------------------- executor
     const finalAmount = verdict.clampedAmountCspr;
+
+    // Non-custodial: the agent never moves money or writes to chain with its own
+    // key. Decisions live in this ledger, and every ALLOCATE becomes a
+    // user-signed CSPR transfer (handled by the API's pending-allocation flow).
+    if (config.nonCustodial) {
+      const onChain = { recorded: false, executed: false, dryRun: false };
+      if (verdict.finalAction === "ALLOCATE" && finalAmount > 0) {
+        log("executor", `${o.id}: ${finalAmount} CSPR ready for your signature — sign in the dashboard to invest (non-custodial).`);
+      } else {
+        log("executor", `${o.id}: ${verdict.finalAction} recorded in the work log.`);
+      }
+      decisions.push({ decision: { ...decision, recommendedAmountCspr: finalAmount }, verdict, report, onChain });
+      continue;
+    }
+
     const onChain = await recordDecisionOnChain({
       opportunityId: o.id,
       action: verdict.finalAction,

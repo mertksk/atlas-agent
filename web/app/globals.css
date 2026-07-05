@@ -290,6 +290,15 @@ button { font: inherit; }
 .log-dl:hover:not(:disabled) { border-color: var(--copper); color: var(--copper); }
 .log-dl:disabled { opacity: 0.4; cursor: default; }
 
+/* non-custodial "sign & invest" — jade/wallet accent, distinct from server approve */
+.approvals.allocations { border-color: rgba(95, 207, 159, 0.35); }
+.approve-btn.wallet-sign {
+  background: linear-gradient(180deg, var(--jade), #2f9e75);
+  color: #06231a;
+  white-space: nowrap;
+}
+.approve-btn.wallet-sign:disabled { background: var(--surface-2); color: var(--faint); cursor: default; box-shadow: none; filter: none; }
+
 .run-btn {
   position: relative;
   font-family: var(--font-mono);

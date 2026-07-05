@@ -36,6 +36,7 @@ interface Approval {
   confidence: number;
   reason: string;
 }
+type PendingAlloc = Approval;
 interface State {
   mode: "dry-run" | "live";
   network: string;
@@ -45,6 +46,8 @@ interface State {
   running: boolean;
   runs: number;
   pendingApprovals: Approval[];
+  pendingAllocations: PendingAlloc[];
+  nonCustodial?: boolean;
   lastRunDataCostCspr: number;
   llm: boolean;
   reasoner?: string;
@@ -213,6 +216,7 @@ export default function Dashboard() {
   const [feeStage, setFeeStage] = useState<"" | "paying" | "submitting">("");
   const [notice, setNotice] = useState<string | null>(null);
   const [feeCspr, setFeeCspr] = useState(1);
+  const [signingAlloc, setSigningAlloc] = useState<string | null>(null);
   const cursor = useRef(0);
   // id -> human name, accumulated across polls so old ledger lines stay readable
   const names = useRef(new Map<string, string>());
@@ -385,6 +389,38 @@ export default function Dashboard() {
       () => undefined,
     );
     poll();
+  };
+
+  /** Non-custodial invest: the agent decided; the USER signs the CSPR transfer. */
+  const signAllocation = async (a: PendingAlloc) => {
+    if (!wallet) {
+      setNotice(t("connectToStart"));
+      return;
+    }
+    setNotice(null);
+    setSigningAlloc(a.opportunityId);
+    try {
+      const build = await fetch(`${AGENT}/api/wallet/allocate/build`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: wallet, opportunityId: a.opportunityId }),
+      }).then((r) => r.json());
+      if (!build?.deploy) throw new Error(build?.error || "could not build allocation");
+      const signatureHex = await signDeploy(JSON.stringify(build.deploy), wallet);
+      const sub = await fetch(`${AGENT}/api/wallet/allocate/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deploy: build.deploy, publicKey: wallet, signatureHex, opportunityId: a.opportunityId }),
+      }).then((r) => r.json());
+      if (!sub?.ok) throw new Error(sub?.error || "allocation failed");
+      setNotice(t("investDone", { amount: a.amountCspr, name: a.opportunityName }));
+      poll();
+    } catch (e) {
+      const m = (e as Error).message;
+      setNotice(m === "cancelled" ? t("investCancelled") : `${t("investFailed")}: ${m}`);
+    } finally {
+      setSigningAlloc(null);
+    }
   };
 
   const latest = new Map<string, Decision>();
@@ -685,8 +721,37 @@ export default function Dashboard() {
           </details>
         </aside>
 
-        {/* center — approvals + opportunities */}
+        {/* center — allocations to sign + approvals + opportunities */}
         <section>
+          {state && (state.pendingAllocations?.length ?? 0) > 0 && (
+            <div className="approvals allocations">
+              <div className="approvals-head">
+                <h2>
+                  {t("investNeedsSig")} <span className="badge">{state.pendingAllocations.length}</span>
+                </h2>
+                <p className="sub">{t("investNeedsSigSub")}</p>
+              </div>
+              {state.pendingAllocations.map((a) => (
+                <div className="approval" key={`alloc-${a.runId}-${a.opportunityId}`}>
+                  <div className="what">
+                    {tRich(t("investQ"), { amount: a.amountCspr, name: a.opportunityName })}
+                    <span className="ap-meta">
+                      {t("riskW")} {a.riskScore}/100 · {t("confW")} {Math.round(a.confidence * 100)}%
+                    </span>
+                  </div>
+                  <button
+                    className="approve-btn wallet-sign"
+                    onClick={() => signAllocation(a)}
+                    disabled={!wallet || signingAlloc === a.opportunityId}
+                    title={wallet ? t("investSignT") : t("connectToStart")}
+                  >
+                    {signingAlloc === a.opportunityId ? t("feePaying") : `🔑 ${t("investSign", { amount: a.amountCspr })}`}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {state && pendingCount > 0 && (
             <div className="approvals">
               <div className="approvals-head">
