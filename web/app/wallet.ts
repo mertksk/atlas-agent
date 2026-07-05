@@ -64,29 +64,35 @@ export async function disconnectWallet(): Promise<void> {
   }
 }
 
-/** Ask the wallet to sign a server-built deploy; returns the hex signature. */
+/** Ask the wallet to sign a server-built deploy; returns the RAW hex signature
+ *  (no 0x, lowercase). The server normalizes/tags it before setSignature — the
+ *  Casper Wallet may return the raw 64-byte sig or an already-tagged 65-byte one. */
 export async function signDeploy(deployJson: string, publicKey: string): Promise<string> {
   const p = provider();
   if (!p) throw new Error("no-wallet");
   const res = await p.sign(deployJson, publicKey);
   if (res.cancelled) throw new Error("cancelled");
-  if (res.signatureHex) return res.signatureHex;
-  if (res.signature) {
+  let hex: string | null = null;
+  if (res.signatureHex) {
+    hex = res.signatureHex;
+  } else if (res.signature) {
     const bytes = res.signature instanceof Uint8Array ? res.signature : Uint8Array.from(res.signature as number[]);
-    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   }
-  throw new Error("no-signature");
+  if (!hex) throw new Error("no-signature");
+  return hex.replace(/^0x/i, "").toLowerCase();
 }
 
-/** Read an account's CSPR balance from the public cspr.live testnet API. */
-export async function walletBalanceCspr(publicKeyHex: string): Promise<number | null> {
+/** Read an account's CSPR balance via the agent's server-side proxy (cspr.live
+ *  blocks cross-origin browser reads, so we go through our own API). */
+export async function walletBalanceCspr(publicKeyHex: string, agentBase = ""): Promise<number | null> {
   try {
-    const r = await fetch(`https://api.testnet.cspr.live/accounts/${publicKeyHex}`, {
-      signal: AbortSignal.timeout(8000),
+    const r = await fetch(`${agentBase}/api/wallet/balance?key=${publicKeyHex}`, {
+      signal: AbortSignal.timeout(9000),
     });
-    if (!r.ok) return 0; // 404 = unfunded account
-    const j = (await r.json()) as { data?: { balance?: string } };
-    return Number(j.data?.balance ?? 0) / 1e9;
+    if (!r.ok) return null;
+    const j = (await r.json()) as { balanceCspr?: number | null };
+    return j.balanceCspr ?? null;
   } catch {
     return null;
   }

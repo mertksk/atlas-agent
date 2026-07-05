@@ -67,12 +67,32 @@ export async function submitSignedDeploy(
   const deploy = s.Deploy.fromJSON(deployJson);
   const pub = s.PublicKey.newPublicKey(publicKeyHex);
 
-  let sig = signatureHex.startsWith("0x") ? signatureHex.slice(2) : signatureHex;
-  // 64-byte raw signature (128 hex chars) → prepend the algorithm tag (01/02).
-  if (sig.length === 128) sig = publicKeyHex.slice(0, 2).toLowerCase() + sig;
+  // A valid on-chain approval signature is 65 bytes: 1 algorithm-tag byte
+  // (01 ed25519 / 02 secp256k1, matching the signer's key) + the 64-byte raw
+  // signature. Deploy.setSignature stores the bytes verbatim (it does NOT add a
+  // tag), and the Casper Wallet may return either the raw 64-byte signature or
+  // an already-tagged 65-byte one — so normalize TOTALLY to exactly one correct
+  // tag. (A brittle "128-only" check misses the already-tagged case.)
+  const tag = publicKeyHex.slice(0, 2).toLowerCase();
+  let sig = signatureHex.replace(/^0x/i, "").toLowerCase();
+  if (sig.length === 130 && (sig.startsWith("01") || sig.startsWith("02"))) {
+    sig = tag + sig.slice(2); // already tagged → re-tag to this key's algorithm
+  } else if (sig.length === 128) {
+    sig = tag + sig; // raw 64-byte → prepend the tag
+  } else {
+    throw new Error(`unexpected signature length: ${sig.length} hex chars`);
+  }
   const sigBytes = Uint8Array.from(Buffer.from(sig, "hex"));
 
   const signed = s.Deploy.setSignature(deploy, sigBytes, pub);
+
+  // Validate locally so a tag/hash mismatch surfaces as a precise message
+  // instead of an opaque RPC -32008 "Invalid Deploy".
+  try {
+    signed.validate();
+  } catch (e) {
+    throw new Error(`deploy failed local validation: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   const rpc = new s.RpcClient(new s.HttpHandler(config.casperRpcUrl));
   const res: any = await rpc.putDeploy(signed);

@@ -560,6 +560,21 @@ app.get("/api/payments", async (_req, res) => {
 // bearer-guarded: building a deploy is harmless, and a submitted deploy can only
 // move exactly what the user signed — the fee itself is the run gate.
 
+// Balance proxy: read an account's CSPR balance server-side (cspr.live blocks
+// cross-origin browser reads, so the dashboard reads it through us instead).
+app.get("/api/wallet/balance", async (req, res) => {
+  const key = String(req.query.key ?? "");
+  if (!/^0[12][0-9a-f]{60,}$/i.test(key)) return res.status(400).json({ error: "invalid public key" });
+  try {
+    const r = await fetch(`https://api.testnet.cspr.live/accounts/${key}`, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return res.json({ balanceCspr: 0 }); // 404 = unfunded account
+    const j = (await r.json()) as { data?: { balance?: string } };
+    return res.json({ balanceCspr: Number(j.data?.balance ?? 0) / 1e9 });
+  } catch {
+    return res.json({ balanceCspr: null });
+  }
+});
+
 // Fee terms (amount + fee wallet) so the UI can show the user what they'll pay.
 app.get("/api/wallet/fee", (_req, res) => res.json(feeInfo()));
 

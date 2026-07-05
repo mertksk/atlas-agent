@@ -263,7 +263,7 @@ export default function Dashboard() {
       return;
     }
     let alive = true;
-    const load = () => walletBalanceCspr(wallet).then((b) => alive && setWalletBal(b)).catch(() => undefined);
+    const load = () => walletBalanceCspr(wallet, AGENT).then((b) => alive && setWalletBal(b)).catch(() => undefined);
     load();
     const id = setInterval(load, 15000);
     return () => {
@@ -307,6 +307,9 @@ export default function Dashboard() {
         body: JSON.stringify({ from: wallet }),
       }).then((r) => r.json());
       if (!build?.deploy) throw new Error(build?.error || "could not build fee deploy");
+      // Casper Wallet's sign() takes the BARE stringified deploy JSON for
+      // casper-js-sdk 5.x (do NOT wrap in { deploy: {...} } — that is the old v2
+      // shape and double-wrapping corrupts the JSON the wallet hashes).
       const signatureHex = await signDeploy(JSON.stringify(build.deploy), wallet);
       setFeeStage("submitting");
       const sub = await fetch(`${AGENT}/api/wallet/fee/submit`, {
