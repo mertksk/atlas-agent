@@ -723,7 +723,7 @@ export default function Dashboard() {
 
         {/* center — allocations to sign + approvals + opportunities */}
         <section>
-          {state && (state.pendingAllocations?.length ?? 0) > 0 && (
+          {wallet && state && (state.pendingAllocations?.length ?? 0) > 0 && (
             <div className="approvals allocations">
               <div className="approvals-head">
                 <h2>
@@ -752,7 +752,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {state && pendingCount > 0 && (
+          {wallet && state && pendingCount > 0 && (
             <div className="approvals">
               <div className="approvals-head">
                 <h2>
@@ -786,8 +786,17 @@ export default function Dashboard() {
 
           {opps.length === 0 && <div className="panel empty">{t("marketDown")}</div>}
 
+          {!wallet && opps.length > 0 && (
+            <div className="connect-hint">
+              <b>{t("connectToStart")}</b> — {t("verdictsHint")}
+            </div>
+          )}
+
           {opps.map((o, idx) => {
-            const d = latest.get(o.id);
+            // The agent's verdict is shared/global (the last run's result). Only
+            // show it once a wallet is connected, so a fresh visitor doesn't see
+            // someone else's "INVESTED"/"REJECTED" as if it were their own.
+            const d = wallet ? latest.get(o.id) : undefined;
             const cls =
               d?.action === "ALLOCATE"
                 ? "allocated"

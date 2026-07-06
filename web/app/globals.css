@@ -299,6 +299,19 @@ button { font: inherit; }
 }
 .approve-btn.wallet-sign:disabled { background: var(--surface-2); color: var(--faint); cursor: default; box-shadow: none; filter: none; }
 
+/* hint shown to visitors who haven't connected a wallet yet */
+.connect-hint {
+  margin: 4px 0 14px;
+  padding: 12px 16px;
+  border: 1px dashed rgba(95, 207, 159, 0.4);
+  border-radius: 12px;
+  background: rgba(95, 207, 159, 0.05);
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.connect-hint b { color: var(--jade); }
+
 .run-btn {
   position: relative;
   font-family: var(--font-mono);

@@ -178,6 +178,7 @@ const en = {
   investDone: "Invested {amount} CSPR in {name} — signed by you.",
   investCancelled: "you cancelled — nothing was invested",
   investFailed: "investment failed",
+  verdictsHint: "connect and run an analysis to get the agent's verdicts on these. The cards stay neutral until then — what you'd see otherwise is another session's result.",
 };
 export type StrKey = keyof typeof en;
 type Dict = Partial<Record<StrKey, string>>;
@@ -277,6 +278,7 @@ const tr: Dict = {
   investDone: "{name} içine {amount} CSPR yatırıldı — senin imzanla.",
   investCancelled: "iptal ettin — hiçbir şey yatırılmadı",
   investFailed: "yatırım başarısız",
+  verdictsHint: "ajanın bunlara dair hükümlerini görmek için cüzdanını bağla ve bir analiz başlat. O zamana kadar kartlar tarafsız kalır — aksi halde göreceğin şey başka bir oturumun sonucudur.",
 };
 
 const es: Dict = {
