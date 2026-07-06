@@ -334,14 +334,17 @@ export default function Dashboard() {
   };
 
   const poll = useCallback(async () => {
+    // Per-wallet session: every scoped request carries the connected key so the
+    // server returns THIS wallet's runs/ledger/allocations (not another session's).
+    const wh: Record<string, string> = wallet ? { "X-Wallet": wallet } : {};
     try {
       const [s, o, d, e, p, m, h] = await Promise.all([
-        fetch(`${AGENT}/api/state`).then((r) => r.json()),
+        fetch(`${AGENT}/api/state`, { headers: wh }).then((r) => r.json()),
         fetch(`${AGENT}/api/opportunities`).then((r) => r.json()),
-        fetch(`${AGENT}/api/decisions`).then((r) => r.json()),
-        fetch(`${AGENT}/api/events?since=${cursor.current}`).then((r) => r.json()),
-        fetch(`${AGENT}/api/payments`).then((r) => r.json()),
-        fetch(`${AGENT}/api/metrics`).then((r) => r.json()).catch(() => null),
+        fetch(`${AGENT}/api/decisions`, { headers: wh }).then((r) => r.json()),
+        fetch(`${AGENT}/api/events?since=${cursor.current}`, { headers: wh }).then((r) => r.json()),
+        fetch(`${AGENT}/api/payments`, { headers: wh }).then((r) => r.json()),
+        fetch(`${AGENT}/api/metrics`, { headers: wh }).then((r) => r.json()).catch(() => null),
         fetch(`${AGENT}/api/health`).then((r) => r.json()).catch(() => null),
       ]);
       setState(s);
@@ -362,7 +365,15 @@ export default function Dashboard() {
     } catch {
       setOffline(true);
     }
-  }, []);
+  }, [wallet]);
+
+  // Switching wallet (connect / disconnect / key change) switches session:
+  // reset the event cursor + accumulated ledger so the new session loads fresh.
+  useEffect(() => {
+    cursor.current = 0;
+    setLedger([]);
+    names.current = new Map();
+  }, [wallet]);
 
   useEffect(() => {
     poll();
@@ -377,6 +388,7 @@ export default function Dashboard() {
     // the run starts directly with the token.
     const headers: Record<string, string> = { ...authHeaders() };
     if (wallet) {
+      headers["X-Wallet"] = wallet; // run into THIS wallet's session
       const credit = await payFee();
       if (!credit) return;
       headers["X-Fee-Credit"] = credit;
@@ -385,7 +397,10 @@ export default function Dashboard() {
     poll();
   };
   const approve = async (a: Approval) => {
-    await fetch(`${AGENT}/api/approve/${a.runId}/${a.opportunityId}`, { method: "POST", headers: authHeaders() }).catch(
+    await fetch(`${AGENT}/api/approve/${a.runId}/${a.opportunityId}`, {
+      method: "POST",
+      headers: { ...authHeaders(), ...(wallet ? { "X-Wallet": wallet } : {}) },
+    }).catch(
       () => undefined,
     );
     poll();
