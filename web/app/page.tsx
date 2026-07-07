@@ -489,9 +489,6 @@ export default function Dashboard() {
               <span className={`chip ${state.mode === "live" ? "live" : "dry"} pulse`}>
                 <i className="dot" /> {state.mode === "live" ? t("live") : t("dry")}
               </span>
-              <span className="chip" title={t("reasonerW")}>
-                {state.reasoner ?? (state.llm ? t("llm") : t("det"))}
-              </span>
             </>
           )}
           <button
@@ -842,11 +839,17 @@ export default function Dashboard() {
                     <h3>{o.name}</h3>
                   </div>
                   <div className="right">
-                    <span className={`apy ${apy > 30 ? "absurd" : ""}`} title={t("advertisedT")}>
-                      {t("advertised")}
-                      <br />
-                      <b>{apy.toFixed(1)}%</b> APY
-                    </span>
+                    {apy > 0 ? (
+                      <span className={`apy ${apy > 30 ? "absurd" : ""}`} title={t("advertisedT")}>
+                        {t("advertised")}
+                        <br />
+                        <b>{apy.toFixed(1)}%</b> APY
+                      </span>
+                    ) : (
+                      <span className="apy spot" title={t("spotSwapT")}>
+                        <b>{t("spotSwap")}</b>
+                      </span>
+                    )}
                     {d && actionLabel && <span className={`action ${d.action}`}>{actionLabel}</span>}
                   </div>
                 </div>

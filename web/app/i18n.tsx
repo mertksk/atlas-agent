@@ -179,6 +179,8 @@ const en = {
   investCancelled: "you cancelled — nothing was invested",
   investFailed: "investment failed",
   verdictsHint: "connect and run an analysis to get the agent's verdicts on these. The cards stay neutral until then — what you'd see otherwise is another session's result.",
+  spotSwap: "spot swap",
+  spotSwapT: "An instant token swap on the DEX — not a yield position, so no APY. The live rate and pool depth are in the description below.",
 };
 export type StrKey = keyof typeof en;
 type Dict = Partial<Record<StrKey, string>>;
@@ -279,6 +281,8 @@ const tr: Dict = {
   investCancelled: "iptal ettin — hiçbir şey yatırılmadı",
   investFailed: "yatırım başarısız",
   verdictsHint: "ajanın bunlara dair hükümlerini görmek için cüzdanını bağla ve bir analiz başlat. O zamana kadar kartlar tarafsız kalır — aksi halde göreceğin şey başka bir oturumun sonucudur.",
+  spotSwap: "spot takas",
+  spotSwapT: "DEX'te anlık token takası — getiri pozisyonu değil, o yüzden APY yok. Canlı kur ve havuz derinliği aşağıdaki açıklamada.",
 };
 
 const es: Dict = {
