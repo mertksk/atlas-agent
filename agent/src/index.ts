@@ -297,9 +297,18 @@ async function refreshTreasuryFromChain(): Promise<void> {
 async function executeRun(session: Session): Promise<RunResult> {
   rolloverDay(session);
   try {
+    // Size allocations against the connected wallet's OWN balance — non-custodial,
+    // so the "treasury" the agent invests from IS the user's CSPR. Keeps the
+    // numbers coherent (invest from your real balance, capped by policy) instead
+    // of the tiny agent-vault mirror. Falls back to the mirror if unavailable.
+    let treasury = agentVaultCspr;
+    if (session.key !== DEMO_KEY && session.key !== LEGACY_KEY) {
+      const bal = await accountBalanceCspr(session.key);
+      if (bal != null && bal > 0) treasury = bal;
+    }
     const result = await runPipeline({
       policy: defaultPolicy,
-      treasuryBalanceCspr: agentVaultCspr,
+      treasuryBalanceCspr: treasury,
       spentTodayCspr: session.spentTodayCspr,
       onLedger: (e) => session.ledger.push(e),
     });

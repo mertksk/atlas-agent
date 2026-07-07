@@ -446,7 +446,9 @@ export default function Dashboard() {
   // Treasury under management = the connected wallet's own CSPR (non-custodial,
   // criterion 6). Falls back to the agent vault mirror when no wallet is linked.
   const walletLinked = wallet != null;
-  const treasuryTarget = walletLinked && walletBal != null ? walletBal : state?.treasuryBalanceCspr ?? 0;
+  // The managed treasury IS the connected wallet's own CSPR (non-custodial).
+  // With no wallet linked there is no treasury to show — the figure reads "—".
+  const treasuryTarget = walletLinked && walletBal != null ? walletBal : 0;
   const treasury = useCountUp(treasuryTarget);
   const pipe = pipelineState(ledger, state?.running ?? false);
   const activeRole = ROLES.find((r) => r.key === pipe.current);
@@ -565,7 +567,7 @@ export default function Dashboard() {
         <section className="vault reveal reveal-1">
           <span className="label">{walletLinked ? t("treasuryWallet") : t("treasury")}</span>
           <div className="figure">
-            {walletLinked ? (walletBal != null ? cspr(treasury) : "…") : state ? cspr(treasury) : "—"}
+            {walletLinked ? (walletBal != null ? cspr(treasury) : "…") : "—"}
             <span className="unit">CSPR</span>
           </div>
           {walletLinked && <p className="custody-note">{t("nonCustodialNote")}</p>}
@@ -978,7 +980,7 @@ export default function Dashboard() {
               {t("decisionsPosted")} · {metrics?.decisions ?? 0}
             </div>
             <div className="h">
-              {t("reasonerW")} · {metrics?.reasoner ?? (state?.llm ? t("llm") : t("det"))}
+              {t("reasonerW")} · {state?.llm ? t("llm") : t("det")}
             </div>
             {(health?.lastError ?? metrics?.lastError) && (
               <div className="h" style={{ color: "var(--coral)" }}>
