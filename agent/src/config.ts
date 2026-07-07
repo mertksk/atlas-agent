@@ -60,7 +60,7 @@ export const config = {
   // WUSDC/WCSPR pool package hash (read reserves off-chain to size min_out).
   csprTradePool: process.env.CSPRTRADE_POOL ?? "8747a781dab337b8014a66865355648223c05439684e62f90c1dbe18e4ed7c3a",
   csprTradeSlippageBps: Number(process.env.CSPRTRADE_SLIPPAGE_BPS ?? 200), // 2%
-  csprTradeMaxSwapCspr: Number(process.env.CSPRTRADE_MAX_SWAP_CSPR ?? 25), // per-swap safety cap
+  csprTradeMaxSwapCspr: Number(process.env.CSPRTRADE_MAX_SWAP_CSPR ?? 50), // per-swap safety cap (>= policy maxPerOp)
   // Where swapped WUSDC lands (an account-hash-... the agent controls).
   csprTradeRecipient: process.env.CSPRTRADE_RECIPIENT ?? "account-hash-14d0146936dae21bf0cc77c385b7d725cb9101462d1dc16c8dc3f405c62c2917",
   // x402 settlement asset. "wusdc" => pay for data with a REAL on-chain WUSDC

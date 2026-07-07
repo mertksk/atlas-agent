@@ -22,7 +22,7 @@ import { config, defaultPolicy, validateConfig, ConfigError } from "./config.js"
 import { runPipeline } from "./orchestrator.js";
 import { reasonerLabel } from "./reasoning.js";
 import { executeAllocationOnChain, recordDecisionOnChain, swapCsprForWusdc, vaultStatus, type OnChainOutcome } from "./chain.js";
-import { feeInfo, buildFeeDeploy, buildTransferDeploy, submitSignedDeploy } from "./wallet.js";
+import { feeInfo, buildFeeDeploy, buildTransferDeploy, submitSignedDeploy, accountHashOf } from "./wallet.js";
 import { motesToCspr, type LedgerEntry, type RunResult } from "./types.js";
 
 /** A payment receipt (usage fee or a user-signed allocation transfer). */
@@ -663,15 +663,28 @@ app.post("/api/wallet/allocate/submit", async (req, res) => {
   if (idx === -1) return res.status(404).json({ error: "no pending allocation for that opportunity" });
   const alloc = session.pendingAllocations[idx];
   try {
+    // 1. REAL cspr.trade swap FIRST — from the agent's buffer → WUSDC to the USER's
+    //    own account. Doing it before we take the user's CSPR means that if the
+    //    swap fails, we never submit their signed transfer and they keep their CSPR.
+    const toAccount = await accountHashOf(body.publicKey);
+    const swap = await swapCsprForWusdc(alloc.amountCspr, toAccount);
+    if (!swap.executed && !swap.dryRun) {
+      return res.status(502).json({ error: `swap failed (your CSPR was not taken): ${swap.error ?? "unknown"}` });
+    }
+    // 2. Swap succeeded (WUSDC is in the user's wallet) — now submit the user's
+    //    signed CSPR transfer to the agent, which replenishes the swap buffer.
     const { deployHash } = await submitSignedDeploy(body.deploy, body.publicKey, body.signatureHex);
+
     session.pendingAllocations.splice(idx, 1);
     session.spentTodayCspr += alloc.amountCspr;
+    const wusdcOut = swap.expectedOut ? (Number(swap.expectedOut) / 1e6).toFixed(4) : null;
     session.feeReceipts.push({
       resource: "/api/allocate",
       amount: BigInt(Math.round(alloc.amountCspr * 1e9)).toString(),
       at: new Date().toISOString(),
       from: body.publicKey,
-      settlement: { transaction: deployHash, mode: "cspr" },
+      // Link the receipt to the real DEX swap tx (the WUSDC the user received).
+      settlement: { transaction: swap.txHash ?? deployHash, mode: "wusdc-swap" },
     });
     if (session.feeReceipts.length > 200) session.feeReceipts.splice(0, session.feeReceipts.length - 200);
     const run = session.runs.find((r) => r.runId === alloc.runId);
@@ -680,10 +693,10 @@ app.post("/api/wallet/allocate/submit", async (req, res) => {
     session.ledger.push({
       ts: new Date().toISOString(),
       agent: "executor",
-      message: `${alloc.opportunityId}: you invested ${alloc.amountCspr} CSPR (wallet-signed, non-custodial) — deploy ${deployHash.slice(0, 10)}… on Casper Testnet.`,
+      message: `${alloc.opportunityId}: you invested ${alloc.amountCspr} CSPR → received ${wusdcOut ? `≈ ${wusdcOut} ` : ""}WUSDC in your wallet (real cspr.trade swap${swap.txHash ? `, ${swap.txHash.slice(0, 10)}…` : ""}) on Casper Testnet.`,
     });
     flushState();
-    res.json({ ok: true, deployHash });
+    res.json({ ok: true, deployHash, swapTx: swap.txHash, wusdcReceived: wusdcOut });
   } catch (err) {
     recordError(session, `allocation submit failed: ${String(err)}`);
     res.status(502).json({ error: String(err instanceof Error ? err.message : err) });

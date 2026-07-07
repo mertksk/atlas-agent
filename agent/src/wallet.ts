@@ -61,6 +61,15 @@ export async function buildTransferDeploy(
   return { deploy: s.Deploy.toJSON(deploy), amountCspr };
 }
 
+/** Compute a Casper account-hash ("account-hash-<hex>") from a public key hex —
+ *  used as the WUSDC swap recipient so the user receives the token. */
+export async function accountHashOf(pubKeyHex: string): Promise<string> {
+  const s = await sdk();
+  const pub = s.PublicKey.newPublicKey(pubKeyHex);
+  const hex = String(pub.accountHash().toHex()).replace(/^account-hash-/i, "").toLowerCase();
+  return `account-hash-${hex}`;
+}
+
 /** Build the unsigned usage-fee deploy: `from` (the connected wallet) → fee wallet. */
 export async function buildFeeDeploy(fromPublicKeyHex: string): Promise<{ deploy: unknown; amountCspr: number }> {
   if (!config.feeRecipientHex) throw new Error("FEE_RECIPIENT_HEX not configured on the server");

@@ -130,13 +130,16 @@ async function poolReserves(poolHash: string): Promise<{ wcspr: bigint; wusdc: b
 }
 
 /**
- * Execute a REAL CSPR->WUSDC swap on the cspr.trade DEX (the agent key signs;
- * WUSDC lands in config.csprTradeRecipient). min_out is sized from live reserves
- * with the configured slippage. Guarded by CSPRTRADE_MAX_SWAP_CSPR.
+ * Execute a REAL CSPR->WUSDC swap on the cspr.trade DEX (the agent key signs
+ * from its own buffer). WUSDC lands in `toAccount` (an account-hash-… / hash-…),
+ * defaulting to config.csprTradeRecipient — for a non-custodial allocation this
+ * is the USER's account, so the user receives the WUSDC. min_out is sized from
+ * live reserves with the configured slippage. Guarded by CSPRTRADE_MAX_SWAP_CSPR.
  */
 export async function swapCsprForWusdc(
   amountCspr: number,
-): Promise<OnChainOutcome & { minOut?: string; expectedOut?: string; txAmountMotes?: string }> {
+  toAccount?: string,
+): Promise<OnChainOutcome & { minOut?: string; expectedOut?: string; txAmountMotes?: string; txHash?: string }> {
   if (config.dryRun) return { recorded: false, executed: false, dryRun: true };
   if (!(amountCspr > 0)) return { recorded: false, executed: false, dryRun: false, error: "swap amount must be > 0" };
   if (amountCspr > config.csprTradeMaxSwapCspr) {
@@ -149,16 +152,16 @@ export async function swapCsprForWusdc(
     const expectedOut = (amountIn * 997n * wusdc) / (wcspr * 1000n + amountIn * 997n);
     const minOut = (expectedOut * BigInt(10_000 - config.csprTradeSlippageBps)) / 10_000n;
     if (minOut <= 0n) throw new Error("computed min_out is 0 (amount too small for current reserves)");
-    await livenet([
+    const { txHash } = await livenetWithTx([
       "swap-cspr",
       config.csprTradeRouter,
       config.csprTradeWcspr,
       config.csprTradeWusdc,
       amountIn.toString(),
-      config.csprTradeRecipient,
+      toAccount ?? config.csprTradeRecipient,
       minOut.toString(),
     ]);
-    return { recorded: false, executed: true, dryRun: false, minOut: minOut.toString(), expectedOut: expectedOut.toString(), txAmountMotes: amountIn.toString() };
+    return { recorded: false, executed: true, dryRun: false, minOut: minOut.toString(), expectedOut: expectedOut.toString(), txAmountMotes: amountIn.toString(), txHash };
   } catch (err) {
     return { recorded: false, executed: false, dryRun: false, error: String(err) };
   }
