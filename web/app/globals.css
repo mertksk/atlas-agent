@@ -247,6 +247,26 @@ button { font: inherit; }
   color: var(--faint);
   max-width: 42ch;
 }
+.tokens-line {
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--jade);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tokens-line .tk-label { color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
+.tokens-line .tk-src {
+  color: var(--steel);
+  border: 1px solid rgba(122, 162, 204, 0.35);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 
 /* transient status line under the masthead */
 .notice {

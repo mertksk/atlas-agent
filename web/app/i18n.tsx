@@ -181,6 +181,8 @@ const en = {
   verdictsHint: "connect and run an analysis to get the agent's verdicts on these. The cards stay neutral until then — what you'd see otherwise is another session's result.",
   spotSwap: "spot swap",
   spotSwapT: "An instant token swap on the DEX — not a yield position, so no APY. The live rate and pool depth are in the description below.",
+  yourTokens: "tokens in your wallet",
+  yourTokensT: "Your CEP-18 token balances, read live from the chain via CSPR.Cloud — this on-chain-verifies the WUSDC you received from the swap.",
 };
 export type StrKey = keyof typeof en;
 type Dict = Partial<Record<StrKey, string>>;
@@ -283,6 +285,8 @@ const tr: Dict = {
   verdictsHint: "ajanın bunlara dair hükümlerini görmek için cüzdanını bağla ve bir analiz başlat. O zamana kadar kartlar tarafsız kalır — aksi halde göreceğin şey başka bir oturumun sonucudur.",
   spotSwap: "spot takas",
   spotSwapT: "DEX'te anlık token takası — getiri pozisyonu değil, o yüzden APY yok. Canlı kur ve havuz derinliği aşağıdaki açıklamada.",
+  yourTokens: "cüzdanındaki token'lar",
+  yourTokensT: "CEP-18 token bakiyelerin, CSPR.Cloud üzerinden zincirden canlı okunur — swap'tan aldığın WUSDC'yi zincir-üstü doğrular.",
 };
 
 const es: Dict = {

@@ -23,6 +23,7 @@ import { runPipeline } from "./orchestrator.js";
 import { reasonerLabel } from "./reasoning.js";
 import { executeAllocationOnChain, recordDecisionOnChain, swapCsprForWusdc, vaultStatus, type OnChainOutcome } from "./chain.js";
 import { feeInfo, buildFeeDeploy, buildTransferDeploy, submitSignedDeploy, accountHashOf } from "./wallet.js";
+import { csprCloudEnabled, cloudAccountBalanceCspr, cloudFtHoldings } from "./csprCloud.js";
 import { motesToCspr, type LedgerEntry, type RunResult } from "./types.js";
 
 /** A payment receipt (usage fee or a user-signed allocation transfer). */
@@ -167,9 +168,18 @@ async function ping(url: string): Promise<boolean> {
   }
 }
 
-/** Read an account's CSPR balance server-side (cspr.live blocks cross-origin). */
+/** Read an account's CSPR balance server-side. Prefers CSPR.Cloud (MAKE's
+ *  indexer) when CSPR_CLOUD_API_KEY is set; falls back to the cspr.live explorer
+ *  API so it behaves exactly as before when the key is absent or errors. */
 async function accountBalanceCspr(key: string): Promise<number | null> {
   if (!WALLET_RE.test(key)) return null;
+  if (csprCloudEnabled()) {
+    try {
+      return await cloudAccountBalanceCspr(key);
+    } catch {
+      /* CSPR.Cloud unavailable/quota — fall back to cspr.live below */
+    }
+  }
   try {
     const r = await fetch(`https://api.testnet.cspr.live/accounts/${key}`, { signal: AbortSignal.timeout(8000) });
     if (!r.ok) return 0; // 404 = unfunded account
@@ -619,6 +629,21 @@ app.get("/api/wallet/balance", async (req, res) => {
   if (key === DEMO_KEY) return res.status(400).json({ error: "invalid public key" });
   const balanceCspr = await accountBalanceCspr(key);
   res.json({ balanceCspr });
+});
+
+// CEP-18 token holdings for a wallet, via CSPR.Cloud's indexer — lets the UI
+// show (and thereby on-chain-VERIFY) the WUSDC the user received from the swap,
+// instead of trusting the DEX response. Empty when CSPR.Cloud isn't configured.
+app.get("/api/wallet/holdings", async (req, res) => {
+  const key = normKey(String(req.query.key ?? ""));
+  if (key === DEMO_KEY) return res.status(400).json({ error: "invalid public key" });
+  if (!csprCloudEnabled()) return res.json({ holdings: [], source: null });
+  try {
+    const holdings = await cloudFtHoldings(key);
+    res.json({ holdings, source: "cspr.cloud" });
+  } catch {
+    res.json({ holdings: [], source: null });
+  }
 });
 
 // Fee terms (amount + fee wallet) so the UI can show the user what they'll pay.

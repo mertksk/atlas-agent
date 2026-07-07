@@ -217,6 +217,8 @@ export default function Dashboard() {
   const [notice, setNotice] = useState<string | null>(null);
   const [feeCspr, setFeeCspr] = useState(1);
   const [signingAlloc, setSigningAlloc] = useState<string | null>(null);
+  // CEP-18 token holdings via CSPR.Cloud (verifies WUSDC received from swaps).
+  const [holdings, setHoldings] = useState<Array<{ symbol: string | null; amount: number }>>([]);
   const cursor = useRef(0);
   // id -> human name, accumulated across polls so old ledger lines stay readable
   const names = useRef(new Map<string, string>());
@@ -260,14 +262,21 @@ export default function Dashboard() {
     });
   }, []);
 
-  // ---- wallet balance: this is the treasury under management (criterion 6).
+  // ---- wallet balance (the treasury) + CEP-18 token holdings (via CSPR.Cloud).
   useEffect(() => {
     if (!wallet) {
       setWalletBal(null);
+      setHoldings([]);
       return;
     }
     let alive = true;
-    const load = () => walletBalanceCspr(wallet, AGENT).then((b) => alive && setWalletBal(b)).catch(() => undefined);
+    const load = () => {
+      walletBalanceCspr(wallet, AGENT).then((b) => alive && setWalletBal(b)).catch(() => undefined);
+      fetch(`${AGENT}/api/wallet/holdings?key=${wallet}`)
+        .then((r) => r.json())
+        .then((j) => alive && setHoldings(Array.isArray(j?.holdings) ? j.holdings : []))
+        .catch(() => undefined);
+    };
     load();
     const id = setInterval(load, 15000);
     return () => {
@@ -571,6 +580,17 @@ export default function Dashboard() {
             <span className="unit">CSPR</span>
           </div>
           {walletLinked && <p className="custody-note">{t("nonCustodialNote")}</p>}
+          {walletLinked && holdings.filter((h) => h.amount > 0).length > 0 && (
+            <p className="tokens-line" title={t("yourTokensT")}>
+              <span className="tk-label">{t("yourTokens")}</span>{" "}
+              {holdings
+                .filter((h) => h.amount > 0)
+                .slice(0, 4)
+                .map((h) => `${h.amount.toLocaleString("en-US", { maximumFractionDigits: 4 })} ${h.symbol ?? "CEP-18"}`)
+                .join(" · ")}
+              <span className="tk-src">cspr.cloud</span>
+            </p>
+          )}
           <div className="substats">
             <div>
               <span className="n">{state ? cspr(state.spentTodayCspr) : "—"}</span>
