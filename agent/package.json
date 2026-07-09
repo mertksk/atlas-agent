@@ -15,7 +15,7 @@
     "@casper-ecosystem/casper-eip-712": "^1.2.1",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "casper-js-sdk": "^5.0.12",
-    "express": "^4.21.0",
+    "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "tweetnacl": "^1.0.3",
     "zod": "^3.23.8"
