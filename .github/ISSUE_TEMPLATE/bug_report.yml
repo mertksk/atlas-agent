@@ -1,0 +1,39 @@
+name: Bug report
+description: Report a problem with Atlas Agent
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - agent (API / pipeline)
+        - web (dashboard)
+        - services (x402 marketplace)
+        - contracts (Odra)
+        - wallet / signing flow
+        - deployment / infra
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Connect wallet …
+        2. Click …
+        3. See error …
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Logs / tx hashes / screenshots
+      description: Console errors, on-chain deploy hashes, or screenshots (redact secrets).
