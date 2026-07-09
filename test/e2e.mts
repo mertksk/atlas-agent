@@ -84,12 +84,18 @@ try {
   check(payments.every((p: any) => p.settlement?.mode === "mock"), "settlements are mock-mode (offline)");
 
   const state1 = await (await fetch(`${A}/api/state`)).json();
-  check(state1.treasuryBalanceCspr < 100, `treasury debited by allocation (${state1.treasuryBalanceCspr} < 100)`);
+  // Non-custodial (default): an ALLOCATE is surfaced as a pending allocation for
+  // the user to sign — it does NOT debit the treasury server-side.
+  check(
+    Array.isArray(state1.pendingAllocations) && state1.pendingAllocations.length >= 1,
+    `ALLOCATE surfaced as a user-signed pending allocation (${state1.pendingAllocations?.length ?? 0})`,
+  );
 
   check(existsSync(STATE_PATH), "state persisted to disk");
   if (existsSync(STATE_PATH)) {
     const persisted = JSON.parse(readFileSync(STATE_PATH, "utf8"));
-    check(persisted.runs?.length >= 1, "persisted state has the run");
+    // Per-wallet sessions: a token/no-wallet run lands in the shared "__demo__" session.
+    check((persisted.sessions?.["__demo__"]?.runs?.length ?? 0) >= 1, "persisted state has the run (demo session)");
   }
 } catch (err) {
   console.log("FAIL - exception:", String(err));
