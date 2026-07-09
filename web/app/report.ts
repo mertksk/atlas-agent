@@ -152,17 +152,43 @@ export async function buildWorkbook(data: ReportData): Promise<import("exceljs")
   return wb;
 }
 
-/** Build + trigger a browser download. */
-export async function downloadReport(data: ReportData): Promise<void> {
-  const wb = await buildWorkbook(data);
-  const buf = await wb.xlsx.writeBuffer();
-  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `atlas-report-${stamp()}.xlsx`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/** Build + trigger a browser download of the .xlsx report. */
+export async function downloadReport(data: ReportData): Promise<void> {
+  const wb = await buildWorkbook(data);
+  const buf = await wb.xlsx.writeBuffer();
+  triggerDownload(
+    new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+    `atlas-report-${stamp()}.xlsx`,
+  );
+}
+
+/**
+ * Download the raw, inspectable run log as JSON — every decision, risk analysis,
+ * x402 settlement, wallet fee and ledger line exactly as the agent recorded it.
+ * Dependency-free (no exceljs) so it works even offline.
+ */
+export function downloadLogs(data: ReportData): void {
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    network: data.state?.network ?? "casper-test",
+    mode: data.state?.mode ?? null,
+    reasoner: data.state?.reasoner ?? null,
+    state: data.state ?? null,
+    opportunities: data.opps ?? [],
+    decisions: data.decisions ?? [],
+    payments: data.payments ?? [],
+    ledger: data.ledger ?? [],
+  };
+  triggerDownload(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), `atlas-log-${stamp()}.json`);
 }

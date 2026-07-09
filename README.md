@@ -16,6 +16,19 @@ Built for the **Casper Agentic Buildathon 2026**.
 
 The one-sentence pitch: most "DeFi agents" decide on free, unverified data and hold the keys themselves. Atlas pays for its information, proves what it paid and why, and physically cannot exceed its mandate — the policy lives in the contract, not in the prompt.
 
+## 🔴 Live, non-custodial, wallet-signed, multi-user
+
+Atlas runs as a **live multi-tenant dApp** at **<https://atlas.77-37-54-173.nip.io>** — connect a Casper Wallet and the agent works *for you*, on *your* CSPR, which never leaves your wallet without your signature.
+
+- **Connect your Casper Wallet** — the connected wallet's own CSPR *is* the treasury under management. The server never holds your key.
+- **Pay to run** — a small usage fee (signed from your wallet) funds the agent's *real* on-chain data purchases, so the desk is self-funding.
+- **The agent researches** (the six roles below) and produces a recommendation — nothing more.
+- **You sign the investment** — nothing moves until you sign. The agent then executes a **real CSPR → WUSDC swap on the [cspr.trade](https://cspr.trade) DEX** (Halborn-audited Uniswap-V2 fork) and the WUSDC lands **in your own wallet**. If the swap fails, your CSPR is never taken.
+- **Verified on-chain** — your CEP-18 balances are read back through the **[CSPR.Cloud](https://cspr.cloud) AI Agent Skill** ([`skills/cspr-cloud/`](skills/cspr-cloud/SKILL.md)), so "you received WUSDC" is proven by the chain, not by the DEX response.
+- **Isolated per wallet** — every connected wallet gets its own session (runs, ledger, pending investments), hardened by an adversarial multi-agent security review (funds are never at risk: every transfer needs your signature).
+
+The evidence-buying pipeline below is the agent's brain; the wallet flow above is how it acts **without ever taking custody of your funds.** Data still flows from real sources (cspr.trade live pool reserves; CSPR.Cloud indexer), and the original on-chain **TreasuryVault + DecisionRegistry** contracts remain deployed for the custodial/audit path.
+
 ## What happens in a run
 
 ```
@@ -193,10 +206,19 @@ All code in this repository was written from scratch for the Casper Agentic Buil
 
 ## Roadmap
 
-- Swap the demo marketplace for live Casper DeFi/RWA sources; let third parties list x402 data services Atlas can discover and price.
-- casper-eip-712 signer so the agent's data payments settle on-chain by default.
-- Multi-treasury: one Atlas serving several vaults with distinct mandates.
-- Strategy outcomes fed back into the registry, so the agent's track record is itself on-chain and queryable.
+Shipped since the first cut:
+
+- ✅ **Live Casper DeFi source** — opportunities are real [cspr.trade](https://cspr.trade) testnet tokens with pool depth/spot read live from chain.
+- ✅ **Real on-chain data payments** — x402 settles as real CEP-18 **WUSDC** micro-payments (self-funded by the usage fee).
+- ✅ **Non-custodial + multi-user** — Casper Wallet signing; per-wallet isolated sessions; real CSPR→WUSDC swaps to the user's wallet.
+- ✅ **CSPR.Cloud AI Agent Skill** — CEP-18 balances read from MAKE's indexer to on-chain-verify swap output.
+
+Next:
+
+- Direct wallet-signed payable contract calls (Condor `transferred_value`) so the DEX swap itself is signed by the user, not just the funding transfer.
+- Optional CSPR.click multi-wallet connect (Ledger, etc.) alongside the Casper Wallet path.
+- Strategy outcomes fed back into the DecisionRegistry, so the agent's track record is itself on-chain and queryable.
+- Signed-challenge session auth for read confidentiality in a multi-tenant deployment.
 
 ## License
 

@@ -15,12 +15,19 @@
 import express from "express";
 import { getLiquidity, getMarketSignal, getRisk, getRwaDoc, OPPORTUNITIES } from "./data.js";
 import * as llama from "./defillama.js";
+import * as csprtrade from "./csprtrade.js";
 import * as marketSignal from "./marketsignal.js";
 import { paid, paymentLedger } from "./x402.js";
 
-// DATA_SOURCE=defillama → real protocol pools from yields.llama.fi (free).
-// Anything else → the deterministic mock marketplace (used by tests/CI).
-const USE_LLAMA = (process.env.DATA_SOURCE ?? "mock").toLowerCase() === "defillama";
+// DATA_SOURCE selects the opportunity marketplace + the data behind the paid
+// endpoints:
+//   defillama  → real protocol pools from yields.llama.fi (free)
+//   csprtrade  → REAL tradeable cspr.trade testnet tokens; risk/liquidity from
+//                live on-chain pool reserves; allocations swap on the DEX
+//   (anything) → the deterministic mock marketplace (tests/CI)
+const SOURCE = (process.env.DATA_SOURCE ?? "mock").toLowerCase();
+const USE_LLAMA = SOURCE === "defillama";
+const USE_CSPRTRADE = SOURCE === "csprtrade";
 
 const app = express();
 
@@ -49,26 +56,26 @@ const MOTES = 1_000_000_000n;
 const price = (cspr: number) => ((BigInt(Math.round(cspr * 1000)) * MOTES) / 1000n).toString();
 
 app.get("/opportunities", async (_req, res) => {
-  res.json(USE_LLAMA ? await llama.listOpportunities() : OPPORTUNITIES);
+  res.json(USE_CSPRTRADE ? await csprtrade.listOpportunities() : USE_LLAMA ? await llama.listOpportunities() : OPPORTUNITIES);
 });
 
 app.get("/api/risk-score", paid(price(0.5), "Protocol risk score with factor breakdown"), async (req, res) => {
   const id = String(req.query.id ?? "");
-  const data = USE_LLAMA ? await llama.risk(id) : getRisk(id);
+  const data = USE_CSPRTRADE ? await csprtrade.risk(id) : USE_LLAMA ? await llama.risk(id) : getRisk(id);
   if (!data) return res.status(404).json({ error: "unknown opportunity id" });
   res.json(data);
 });
 
 app.get("/api/liquidity", paid(price(0.3), "Liquidity depth, volume and withdrawal terms"), async (req, res) => {
   const id = String(req.query.id ?? "");
-  const data = USE_LLAMA ? await llama.liquidity(id) : getLiquidity(id);
+  const data = USE_CSPRTRADE ? await csprtrade.liquidity(id) : USE_LLAMA ? await llama.liquidity(id) : getLiquidity(id);
   if (!data) return res.status(404).json({ error: "unknown opportunity id" });
   res.json(data);
 });
 
 app.get("/api/rwa-doc", paid(price(0.8), "RWA legal document analysis and disclosure gaps"), async (req, res) => {
   const id = String(req.query.id ?? "");
-  const data = USE_LLAMA ? await llama.rwaDoc(id) : getRwaDoc(id);
+  const data = USE_CSPRTRADE ? await csprtrade.rwaDoc(id) : USE_LLAMA ? await llama.rwaDoc(id) : getRwaDoc(id);
   if (!data) return res.status(404).json({ error: "unknown opportunity id" });
   res.json(data);
 });
@@ -84,6 +91,8 @@ app.get("/payments", (_req, res) => {
 const PORT = Number(process.env.SERVICES_PORT ?? 4021);
 app.listen(PORT, () => {
   console.log(`[services] Atlas data services on :${PORT}`);
-  console.log(`[services] data source: ${USE_LLAMA ? "DefiLlama (live yields.llama.fi)" : "mock marketplace"}`);
+  console.log(
+    `[services] data source: ${USE_CSPRTRADE ? "cspr.trade (live testnet DEX reserves)" : USE_LLAMA ? "DefiLlama (live yields.llama.fi)" : "mock marketplace"}`,
+  );
   console.log(`[services] x402 mode: ${process.env.FACILITATOR_URL ? `facilitator @ ${process.env.FACILITATOR_URL}` : "mock (set FACILITATOR_URL for on-chain settlement)"}`);
 });

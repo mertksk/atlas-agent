@@ -60,7 +60,7 @@ export const config = {
   // WUSDC/WCSPR pool package hash (read reserves off-chain to size min_out).
   csprTradePool: process.env.CSPRTRADE_POOL ?? "8747a781dab337b8014a66865355648223c05439684e62f90c1dbe18e4ed7c3a",
   csprTradeSlippageBps: Number(process.env.CSPRTRADE_SLIPPAGE_BPS ?? 200), // 2%
-  csprTradeMaxSwapCspr: Number(process.env.CSPRTRADE_MAX_SWAP_CSPR ?? 25), // per-swap safety cap
+  csprTradeMaxSwapCspr: Number(process.env.CSPRTRADE_MAX_SWAP_CSPR ?? 50), // per-swap safety cap (>= policy maxPerOp)
   // Where swapped WUSDC lands (an account-hash-... the agent controls).
   csprTradeRecipient: process.env.CSPRTRADE_RECIPIENT ?? "account-hash-14d0146936dae21bf0cc77c385b7d725cb9101462d1dc16c8dc3f405c62c2917",
   // x402 settlement asset. "wusdc" => pay for data with a REAL on-chain WUSDC
@@ -75,6 +75,26 @@ export const config = {
   // X402_PAYEE format. Defaults to the owner/deployer account.
   x402WusdcPayee:
     process.env.X402_WUSDC_PAYEE ?? "account-hash-a54a5bcda6707361564fab8dc3bff790133c4e1fc8caf2bf2219e49593aa1ec4",
+  // --- Non-custodial wallet flow (monetization, criterion 3) ---
+  // The connected Casper Wallet pays a small usage fee per analysis run to a fee
+  // wallet WE designate, signing it themselves (server never holds the user key).
+  // FEE_RECIPIENT_HEX must be a Casper PUBLIC KEY hex (01…/02…), not an account
+  // hash — the native transfer builder needs a public key on both ends.
+  feeRecipientHex: process.env.FEE_RECIPIENT_HEX ?? "0177aedd327559f049bc0d7b8fa8d2ee7f46ebca094661fe31f3ad4f5290772fdc",
+  // The Casper chainspec sets native_transfer_minimum_motes = 2_500_000_000 (2.5
+  // CSPR): a native transfer below that is rejected by the node with -32008. So
+  // the usage fee must be >= 2.5 CSPR (enforced in wallet.buildFeeDeploy).
+  feeCspr: num("FEE_CSPR", process.env.FEE_CSPR, 2.5),
+  casperRpcUrl: process.env.CASPER_RPC_URL ?? "https://node.testnet.casper.network/rpc",
+  casperChainName: process.env.CASPER_CHAIN_NAME ?? "casper-test",
+  // Non-custodial execution: the agent does NOT move money or write to chain with
+  // its own key. Instead, every ALLOCATE becomes a user-signed CSPR transfer (the
+  // connected wallet signs it, its own CSPR moves). Default on for the dApp.
+  nonCustodial: bool(process.env.NON_CUSTODIAL, true),
+  // Where a user-signed allocation lands (the managed strategy account). MUST be
+  // a public key hex (01…/02…) — the native transfer builder needs one.
+  allocationRecipientHex:
+    process.env.ALLOCATION_RECIPIENT_HEX ?? "0177aedd327559f049bc0d7b8fa8d2ee7f46ebca094661fe31f3ad4f5290772fdc",
   // Bearer token guarding the state-changing API endpoints (run, approve).
   // Unset => those endpoints are unauthenticated (dev only).
   apiToken: process.env.AGENT_API_TOKEN,

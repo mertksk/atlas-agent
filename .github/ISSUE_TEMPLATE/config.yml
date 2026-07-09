@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/mertksk/atlas-agent/security/advisories/new
+    about: Please report security issues privately, not as a public issue.
+  - name: Live demo
+    url: https://atlas.77-37-54-173.nip.io
+    about: Try Atlas on Casper Testnet.

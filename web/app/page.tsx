@@ -2,8 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Onboarding from "./Onboarding";
-import { downloadReport } from "./report";
+import { downloadReport, downloadLogs } from "./report";
 import { useI18n, LANGS, type Lang, type StrKey } from "./i18n";
+import {
+  connectWallet,
+  currentKey,
+  disconnectWallet,
+  walletBalanceCspr,
+  subscribeWallet,
+  signDeploy,
+  shortKey,
+  walletInstalled,
+} from "./wallet";
 
 const AGENT = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:4030";
 const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_AGENT_API_TOKEN ?? "";
@@ -26,6 +36,7 @@ interface Approval {
   confidence: number;
   reason: string;
 }
+type PendingAlloc = Approval;
 interface State {
   mode: "dry-run" | "live";
   network: string;
@@ -35,6 +46,8 @@ interface State {
   running: boolean;
   runs: number;
   pendingApprovals: Approval[];
+  pendingAllocations: PendingAlloc[];
+  nonCustodial?: boolean;
   lastRunDataCostCspr: number;
   llm: boolean;
   reasoner?: string;
@@ -196,6 +209,16 @@ export default function Dashboard() {
   const [offline, setOffline] = useState(false);
   const [token, setToken] = useState("");
   const [editingToken, setEditingToken] = useState(false);
+  // --- wallet (non-custodial) ---
+  const [wallet, setWallet] = useState<string | null>(null);
+  const [walletBal, setWalletBal] = useState<number | null>(null);
+  const [walletBusy, setWalletBusy] = useState(false);
+  const [feeStage, setFeeStage] = useState<"" | "paying" | "submitting">("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [feeCspr, setFeeCspr] = useState(1);
+  const [signingAlloc, setSigningAlloc] = useState<string | null>(null);
+  // CEP-18 token holdings via CSPR.Cloud (verifies WUSDC received from swaps).
+  const [holdings, setHoldings] = useState<Array<{ symbol: string | null; amount: number }>>([]);
   const cursor = useRef(0);
   // id -> human name, accumulated across polls so old ledger lines stay readable
   const names = useRef(new Map<string, string>());
@@ -218,15 +241,119 @@ export default function Dashboard() {
   };
   const authHeaders = (): Record<string, string> => (token ? { Authorization: `Bearer ${token}` } : {});
 
+  // ---- wallet: restore an existing connection, subscribe to key/disconnect
+  // events, and learn the server's fee terms. Non-custodial: we only read the
+  // public key + balance; the wallet holds the key and signs every move.
+  useEffect(() => {
+    currentKey().then((k) => k && setWallet(k)).catch(() => undefined);
+    fetch(`${AGENT}/api/wallet/fee`)
+      .then((r) => r.json())
+      .then((f) => typeof f?.feeCspr === "number" && setFeeCspr(f.feeCspr))
+      .catch(() => undefined);
+    return subscribeWallet({
+      onKey: (k) => {
+        setWallet(k);
+        setNotice(null);
+      },
+      onDisconnect: () => {
+        setWallet(null);
+        setWalletBal(null);
+      },
+    });
+  }, []);
+
+  // ---- wallet balance (the treasury) + CEP-18 token holdings (via CSPR.Cloud).
+  useEffect(() => {
+    if (!wallet) {
+      setWalletBal(null);
+      setHoldings([]);
+      return;
+    }
+    let alive = true;
+    const load = () => {
+      walletBalanceCspr(wallet, AGENT).then((b) => alive && setWalletBal(b)).catch(() => undefined);
+      fetch(`${AGENT}/api/wallet/holdings?key=${wallet}`)
+        .then((r) => r.json())
+        .then((j) => alive && setHoldings(Array.isArray(j?.holdings) ? j.holdings : []))
+        .catch(() => undefined);
+    };
+    load();
+    const id = setInterval(load, 15000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [wallet]);
+
+  const onConnect = async () => {
+    setNotice(null);
+    setWalletBusy(true);
+    try {
+      if (!walletInstalled()) {
+        setNotice(t("walletInstall"));
+        return;
+      }
+      setWallet(await connectWallet());
+    } catch (e) {
+      setNotice((e as Error).message === "rejected" ? t("walletRejected") : t("walletInstall"));
+    } finally {
+      setWalletBusy(false);
+    }
+  };
+
+  const onDisconnect = async () => {
+    await disconnectWallet().catch(() => undefined);
+    setWallet(null);
+    setWalletBal(null);
+  };
+
+  /** Charge the usage fee from the connected wallet (user signs). Returns a
+   *  one-time run credit on success (authorizes exactly one run), else null. */
+  const payFee = async (): Promise<string | null> => {
+    if (!wallet) return null;
+    setNotice(null);
+    try {
+      setFeeStage("paying");
+      const build = await fetch(`${AGENT}/api/wallet/fee/build`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: wallet }),
+      }).then((r) => r.json());
+      if (!build?.deploy) throw new Error(build?.error || "could not build fee deploy");
+      // Casper Wallet's sign() takes the BARE stringified deploy JSON for
+      // casper-js-sdk 5.x (do NOT wrap in { deploy: {...} } — that is the old v2
+      // shape and double-wrapping corrupts the JSON the wallet hashes).
+      const signatureHex = await signDeploy(JSON.stringify(build.deploy), wallet);
+      setFeeStage("submitting");
+      const sub = await fetch(`${AGENT}/api/wallet/fee/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deploy: build.deploy, publicKey: wallet, signatureHex }),
+      }).then((r) => r.json());
+      if (!sub?.ok || !sub.runCredit) throw new Error(sub?.error || "fee submission failed");
+      setNotice(t("feePaid"));
+      return sub.runCredit as string;
+    } catch (e) {
+      const m = (e as Error).message;
+      setNotice(m === "cancelled" ? t("feeCancelled") : `${t("feeFailed")}: ${m}`);
+      return null;
+    } finally {
+      setFeeStage("");
+    }
+  };
+
   const poll = useCallback(async () => {
+    // Per-wallet session: every scoped request carries the connected key so the
+    // server returns THIS wallet's runs/ledger/allocations (not another session's).
+    const wh: Record<string, string> = wallet ? { "X-Wallet": wallet } : {};
     try {
       const [s, o, d, e, p, m, h] = await Promise.all([
-        fetch(`${AGENT}/api/state`).then((r) => r.json()),
+        fetch(`${AGENT}/api/state`, { headers: wh }).then((r) => r.json()),
         fetch(`${AGENT}/api/opportunities`).then((r) => r.json()),
-        fetch(`${AGENT}/api/decisions`).then((r) => r.json()),
-        fetch(`${AGENT}/api/events?since=${cursor.current}`).then((r) => r.json()),
-        fetch(`${AGENT}/api/payments`).then((r) => r.json()),
-        fetch(`${AGENT}/api/metrics`).then((r) => r.json()).catch(() => null),
+        fetch(`${AGENT}/api/decisions`, { headers: wh }).then((r) => r.json()),
+        fetch(`${AGENT}/api/events?since=${cursor.current}`, { headers: wh }).then((r) => r.json()),
+        fetch(`${AGENT}/api/payments`, { headers: wh }).then((r) => r.json()),
+        fetch(`${AGENT}/api/metrics`, { headers: wh }).then((r) => r.json()).catch(() => null),
         fetch(`${AGENT}/api/health`).then((r) => r.json()).catch(() => null),
       ]);
       setState(s);
@@ -247,7 +374,15 @@ export default function Dashboard() {
     } catch {
       setOffline(true);
     }
-  }, []);
+  }, [wallet]);
+
+  // Switching wallet (connect / disconnect / key change) switches session:
+  // reset the event cursor + accumulated ledger so the new session loads fresh.
+  useEffect(() => {
+    cursor.current = 0;
+    setLedger([]);
+    names.current = new Map();
+  }, [wallet]);
 
   useEffect(() => {
     poll();
@@ -256,14 +391,60 @@ export default function Dashboard() {
   }, [poll]);
 
   const runAnalysis = async () => {
-    await fetch(`${AGENT}/api/run`, { method: "POST", headers: authHeaders() }).catch(() => undefined);
+    // Monetized path: with a wallet connected, charge the usage fee first (the
+    // user signs it). The fee returns a one-time run credit that authorizes the
+    // run — a wallet user needs no bearer token. Without a wallet (local demo)
+    // the run starts directly with the token.
+    const headers: Record<string, string> = { ...authHeaders() };
+    if (wallet) {
+      headers["X-Wallet"] = wallet; // run into THIS wallet's session
+      const credit = await payFee();
+      if (!credit) return;
+      headers["X-Fee-Credit"] = credit;
+    }
+    await fetch(`${AGENT}/api/run`, { method: "POST", headers }).catch(() => undefined);
     poll();
   };
   const approve = async (a: Approval) => {
-    await fetch(`${AGENT}/api/approve/${a.runId}/${a.opportunityId}`, { method: "POST", headers: authHeaders() }).catch(
+    await fetch(`${AGENT}/api/approve/${a.runId}/${a.opportunityId}`, {
+      method: "POST",
+      headers: { ...authHeaders(), ...(wallet ? { "X-Wallet": wallet } : {}) },
+    }).catch(
       () => undefined,
     );
     poll();
+  };
+
+  /** Non-custodial invest: the agent decided; the USER signs the CSPR transfer. */
+  const signAllocation = async (a: PendingAlloc) => {
+    if (!wallet) {
+      setNotice(t("connectToStart"));
+      return;
+    }
+    setNotice(null);
+    setSigningAlloc(a.opportunityId);
+    try {
+      const build = await fetch(`${AGENT}/api/wallet/allocate/build`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: wallet, opportunityId: a.opportunityId }),
+      }).then((r) => r.json());
+      if (!build?.deploy) throw new Error(build?.error || "could not build allocation");
+      const signatureHex = await signDeploy(JSON.stringify(build.deploy), wallet);
+      const sub = await fetch(`${AGENT}/api/wallet/allocate/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deploy: build.deploy, publicKey: wallet, signatureHex, opportunityId: a.opportunityId }),
+      }).then((r) => r.json());
+      if (!sub?.ok) throw new Error(sub?.error || "allocation failed");
+      setNotice(t("investDone", { amount: a.amountCspr, name: a.opportunityName }));
+      poll();
+    } catch (e) {
+      const m = (e as Error).message;
+      setNotice(m === "cancelled" ? t("investCancelled") : `${t("investFailed")}: ${m}`);
+    } finally {
+      setSigningAlloc(null);
+    }
   };
 
   const latest = new Map<string, Decision>();
@@ -271,7 +452,13 @@ export default function Dashboard() {
 
   const dataSpend = state?.lastRunDataCostCspr ?? 0;
   const budget = state?.policy.dataBudgetCspr ?? 1;
-  const treasury = useCountUp(state?.treasuryBalanceCspr ?? 0);
+  // Treasury under management = the connected wallet's own CSPR (non-custodial,
+  // criterion 6). Falls back to the agent vault mirror when no wallet is linked.
+  const walletLinked = wallet != null;
+  // The managed treasury IS the connected wallet's own CSPR (non-custodial).
+  // With no wallet linked there is no treasury to show — the figure reads "—".
+  const treasuryTarget = walletLinked && walletBal != null ? walletBal : 0;
+  const treasury = useCountUp(treasuryTarget);
   const pipe = pipelineState(ledger, state?.running ?? false);
   const activeRole = ROLES.find((r) => r.key === pipe.current);
   const activeStep = activeRole ? ROLES.indexOf(activeRole) + 1 : 0;
@@ -313,9 +500,6 @@ export default function Dashboard() {
               <span className={`chip ${state.mode === "live" ? "live" : "dry"} pulse`}>
                 <i className="dot" /> {state.mode === "live" ? t("live") : t("dry")}
               </span>
-              <span className="chip" title={t("reasonerW")}>
-                {state.reasoner ?? (state.llm ? t("llm") : t("det"))}
-              </span>
             </>
           )}
           <button
@@ -326,44 +510,87 @@ export default function Dashboard() {
           >
             ⤓ {t("report")}
           </button>
-          {token && !editingToken ? (
-            <span className="chip authed" title={t("authedT")}>
-              <i className="dot" /> {t("authed")}
-              <button className="chip-link" onClick={() => setEditingToken(true)} title={t("apiToken")}>
-                {t("change")}
+          {wallet ? (
+            <span className="chip wallet" title={t("nonCustodialNote")}>
+              <i className="dot" /> 🔑 {shortKey(wallet)}
+              {walletBal != null && <b className="wbal">· {cspr(walletBal)} CSPR</b>}
+              <button className="chip-link" onClick={onDisconnect} title={t("walletDisconnect")}>
+                {t("walletDisconnect")}
               </button>
             </span>
           ) : (
-            <input
-              className="token-input"
-              type="password"
-              placeholder={t("apiToken")}
-              value={token}
-              autoFocus={editingToken}
-              onChange={(e) => saveToken(e.target.value)}
-              onBlur={() => setEditingToken(false)}
-              title={t("tokenT")}
-            />
+            <button className="wallet-btn" onClick={onConnect} disabled={walletBusy} title={t("walletT")}>
+              {walletBusy ? t("walletConnecting") : `🔗 ${t("walletConnect")}`}
+            </button>
           )}
+          {/* API token is only needed for the local/demo (no-wallet) path. */}
+          {!wallet &&
+            (token && !editingToken ? (
+              <span className="chip authed" title={t("authedT")}>
+                <i className="dot" /> {t("authed")}
+                <button className="chip-link" onClick={() => setEditingToken(true)} title={t("apiToken")}>
+                  {t("change")}
+                </button>
+              </span>
+            ) : (
+              <input
+                className="token-input"
+                type="password"
+                placeholder={t("apiToken")}
+                value={token}
+                autoFocus={editingToken}
+                onChange={(e) => saveToken(e.target.value)}
+                onBlur={() => setEditingToken(false)}
+                title={t("tokenT")}
+              />
+            ))}
           <button
-            className={`run-btn ${state?.running ? "working" : ""}`}
+            className={`run-btn ${state?.running || feeStage ? "working" : ""}`}
             onClick={runAnalysis}
-            disabled={!state || state.running}
+            disabled={!state || state.running || feeStage !== "" || walletBusy}
             title={t("runT")}
           >
-            {state?.running ? t("running") : t("run")}
+            {feeStage === "paying"
+              ? t("feePaying")
+              : feeStage === "submitting"
+                ? t("feeSubmitting")
+                : state?.running
+                  ? t("running")
+                  : wallet
+                    ? t("feePayRun", { amount: feeCspr })
+                    : t("run")}
           </button>
         </div>
       </header>
+      {notice && (
+        <div className="notice" role="status">
+          {notice}
+          <button className="notice-x" onClick={() => setNotice(null)} aria-label="dismiss">
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* ------------------------------------------------------------- hero */}
       <div className="hero">
         <section className="vault reveal reveal-1">
-          <span className="label">{t("treasury")}</span>
+          <span className="label">{walletLinked ? t("treasuryWallet") : t("treasury")}</span>
           <div className="figure">
-            {state ? cspr(treasury) : "—"}
+            {walletLinked ? (walletBal != null ? cspr(treasury) : "…") : "—"}
             <span className="unit">CSPR</span>
           </div>
+          {walletLinked && <p className="custody-note">{t("nonCustodialNote")}</p>}
+          {walletLinked && holdings.filter((h) => h.amount > 0).length > 0 && (
+            <p className="tokens-line" title={t("yourTokensT")}>
+              <span className="tk-label">{t("yourTokens")}</span>{" "}
+              {holdings
+                .filter((h) => h.amount > 0)
+                .slice(0, 4)
+                .map((h) => `${h.amount.toLocaleString("en-US", { maximumFractionDigits: 4 })} ${h.symbol ?? "CEP-18"}`)
+                .join(" · ")}
+              <span className="tk-src">cspr.cloud</span>
+            </p>
+          )}
           <div className="substats">
             <div>
               <span className="n">{state ? cspr(state.spentTodayCspr) : "—"}</span>
@@ -528,9 +755,38 @@ export default function Dashboard() {
           </details>
         </aside>
 
-        {/* center — approvals + opportunities */}
+        {/* center — allocations to sign + approvals + opportunities */}
         <section>
-          {state && pendingCount > 0 && (
+          {wallet && state && (state.pendingAllocations?.length ?? 0) > 0 && (
+            <div className="approvals allocations">
+              <div className="approvals-head">
+                <h2>
+                  {t("investNeedsSig")} <span className="badge">{state.pendingAllocations.length}</span>
+                </h2>
+                <p className="sub">{t("investNeedsSigSub")}</p>
+              </div>
+              {state.pendingAllocations.map((a) => (
+                <div className="approval" key={`alloc-${a.runId}-${a.opportunityId}`}>
+                  <div className="what">
+                    {tRich(t("investQ"), { amount: a.amountCspr, name: a.opportunityName })}
+                    <span className="ap-meta">
+                      {t("riskW")} {a.riskScore}/100 · {t("confW")} {Math.round(a.confidence * 100)}%
+                    </span>
+                  </div>
+                  <button
+                    className="approve-btn wallet-sign"
+                    onClick={() => signAllocation(a)}
+                    disabled={!wallet || signingAlloc === a.opportunityId}
+                    title={wallet ? t("investSignT") : t("connectToStart")}
+                  >
+                    {signingAlloc === a.opportunityId ? t("feePaying") : `🔑 ${t("investSign", { amount: a.amountCspr })}`}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {wallet && state && pendingCount > 0 && (
             <div className="approvals">
               <div className="approvals-head">
                 <h2>
@@ -564,8 +820,17 @@ export default function Dashboard() {
 
           {opps.length === 0 && <div className="panel empty">{t("marketDown")}</div>}
 
+          {!wallet && opps.length > 0 && (
+            <div className="connect-hint">
+              <b>{t("connectToStart")}</b> — {t("verdictsHint")}
+            </div>
+          )}
+
           {opps.map((o, idx) => {
-            const d = latest.get(o.id);
+            // The agent's verdict is shared/global (the last run's result). Only
+            // show it once a wallet is connected, so a fresh visitor doesn't see
+            // someone else's "INVESTED"/"REJECTED" as if it were their own.
+            const d = wallet ? latest.get(o.id) : undefined;
             const cls =
               d?.action === "ALLOCATE"
                 ? "allocated"
@@ -596,11 +861,17 @@ export default function Dashboard() {
                     <h3>{o.name}</h3>
                   </div>
                   <div className="right">
-                    <span className={`apy ${apy > 30 ? "absurd" : ""}`} title={t("advertisedT")}>
-                      {t("advertised")}
-                      <br />
-                      <b>{apy.toFixed(1)}%</b> APY
-                    </span>
+                    {apy > 0 ? (
+                      <span className={`apy ${apy > 30 ? "absurd" : ""}`} title={t("advertisedT")}>
+                        {t("advertised")}
+                        <br />
+                        <b>{apy.toFixed(1)}%</b> APY
+                      </span>
+                    ) : (
+                      <span className="apy spot" title={t("spotSwapT")}>
+                        <b>{t("spotSwap")}</b>
+                      </span>
+                    )}
                     {d && actionLabel && <span className={`action ${d.action}`}>{actionLabel}</span>}
                   </div>
                 </div>
@@ -654,7 +925,17 @@ export default function Dashboard() {
         {/* right — ledger + settlements */}
         <aside>
           <section className="panel reveal reveal-3">
-            <h2>{t("workLog")}</h2>
+            <div className="worklog-head">
+              <h2>{t("workLog")}</h2>
+              <button
+                className="log-dl"
+                onClick={() => downloadLogs({ state, opps, decisions, payments, ledger })}
+                disabled={ledger.length === 0 && decisions.length === 0}
+                title={t("downloadLogT")}
+              >
+                ⤓ {t("downloadLog")}
+              </button>
+            </div>
             <p className="sub">
               {t("workLogSub")}
               {lang !== "en" ? ` ${t("logNote")}` : ""}
@@ -719,7 +1000,7 @@ export default function Dashboard() {
               {t("decisionsPosted")} · {metrics?.decisions ?? 0}
             </div>
             <div className="h">
-              {t("reasonerW")} · {metrics?.reasoner ?? (state?.llm ? t("llm") : t("det"))}
+              {t("reasonerW")} · {state?.llm ? t("llm") : t("det")}
             </div>
             {(health?.lastError ?? metrics?.lastError) && (
               <div className="h" style={{ color: "var(--coral)" }}>
