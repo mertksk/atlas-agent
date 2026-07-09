@@ -15,6 +15,7 @@
  * State is persisted to config.statePath so a restart resumes where it left off.
  */
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { timingSafeEqual, randomUUID } from "node:crypto";
@@ -152,10 +153,13 @@ let runningSession: string | null = null;
 // connected wallet's own balance as the treasury).
 let agentVaultCspr = config.treasuryBalanceCspr;
 
-/** Record an operational error on a session (surfaced in its health/metrics). */
+/** Record an operational error on a session (surfaced in its health/metrics).
+ *  Newlines/control chars are stripped so a user-influenced message can't forge
+ *  extra log lines (log injection). */
 function recordError(session: Session, message: string): void {
-  session.lastError = { message: message.slice(0, 300), at: new Date().toISOString() };
-  console.error(`[atlas-agent] error (${session.key.slice(0, 12)}): ${message}`);
+  const clean = String(message).replace(/[\r\n\t\p{C}]+/gu, " ").slice(0, 300);
+  session.lastError = { message: clean, at: new Date().toISOString() };
+  console.error(`[atlas-agent] error (${session.key.slice(0, 12)}): ${clean}`);
 }
 
 /** Quick reachability probe (2s timeout) for dependency health. */
@@ -447,7 +451,17 @@ if (!config.dryRun) {
 }
 
 const app = express();
+// Behind nginx: trust the first proxy hop so the rate limiter keys on the real
+// client IP (X-Forwarded-For), not the proxy's 127.0.0.1.
+app.set("trust proxy", 1);
 app.use(express.json());
+
+// Rate limiting (defense against abuse / runaway loops). Generous global cap —
+// the dashboard polls ~4 req/s per client — plus a tighter cap on the
+// money-moving / work-triggering POST endpoints.
+const globalLimiter = rateLimit({ windowMs: 60_000, max: 1000, standardHeaders: true, legacyHeaders: false });
+const writeLimiter = rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false });
+app.use(globalLimiter);
 
 // Lightweight access log: method, path, status, latency.
 app.use((req, res, next) => {
@@ -551,7 +565,7 @@ function runAuthorized(req: express.Request, key: string, session: Session): boo
   return typeof credit === "string" && consumeRunCredit(session, credit);
 }
 
-app.post("/api/run", (req, res) => {
+app.post("/api/run", writeLimiter, (req, res) => {
   const key = sessionKeyFrom(req);
   // Authorize against the EXISTING session (its paid-fee run credit) without
   // creating one — an unauthorized request must not mint a session (GET/POST spam).
@@ -676,7 +690,7 @@ app.post("/api/wallet/allocate/build", async (req, res) => {
 });
 
 // Attach the wallet's signature, submit the allocation transfer, record it.
-app.post("/api/wallet/allocate/submit", async (req, res) => {
+app.post("/api/wallet/allocate/submit", writeLimiter, async (req, res) => {
   const body = req.body as
     | { deploy?: unknown; publicKey?: string; signatureHex?: string; opportunityId?: string }
     | undefined;
@@ -729,7 +743,7 @@ app.post("/api/wallet/allocate/submit", async (req, res) => {
 });
 
 // Attach the wallet's signature, submit the fee, mint a run credit in ITS session.
-app.post("/api/wallet/fee/submit", async (req, res) => {
+app.post("/api/wallet/fee/submit", writeLimiter, async (req, res) => {
   const body = req.body as { deploy?: unknown; publicKey?: string; signatureHex?: string } | undefined;
   if (!body?.deploy || !body.publicKey || !body.signatureHex) {
     return res.status(400).json({ error: "deploy, publicKey and signatureHex are required" });
@@ -778,7 +792,7 @@ function tokenAuthorized(req: express.Request): boolean {
 // the owner key. Token-guarded — it moves funds with the SERVER's key (unlike
 // the non-custodial allocation flow, where the user signs). In non-custodial
 // mode (default) there are no pending approvals, so this path is unused.
-app.post("/api/approve/:runId/:oppId", async (req, res) => {
+app.post("/api/approve/:runId/:oppId", writeLimiter, async (req, res) => {
   if (!tokenAuthorized(req)) return res.status(401).json({ error: "unauthorized" });
   const session = getSession(sessionKeyFrom(req));
   const idx = session.pendingApprovals.findIndex(
