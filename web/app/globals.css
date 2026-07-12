@@ -560,6 +560,16 @@ a.cv:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
 .meter { height: 5px; background: var(--ink); border-radius: 999px; margin-top: 12px; overflow: hidden; border: 1px solid var(--line); }
 .meter i { display: block; height: 100%; background: linear-gradient(90deg, var(--copper-deep), var(--copper)); transition: width 500ms cubic-bezier(.2,.7,.3,1); }
 .meter-cap { font-family: var(--font-mono); font-size: 10px; color: var(--faint); margin-top: 6px; letter-spacing: 0.04em; }
+.guard-proof {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--faint);
+}
+.guard-proof a { color: var(--jade); text-decoration: none; border-bottom: 1px dotted var(--jade); }
+.guard-proof a:hover { border-bottom-style: solid; }
 
 /* contracts mono links */
 .contract { display: flex; flex-direction: column; gap: 3px; padding: 9px 0; border-bottom: 1px dotted var(--line); }

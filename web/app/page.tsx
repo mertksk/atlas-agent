@@ -16,6 +16,10 @@ import {
 } from "./wallet";
 
 const AGENT = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:4030";
+// A real on-chain refusal: the TreasuryVault rejecting an over-budget
+// execute_allocation with `User error: 9` (InsufficientFunds). Linked from the
+// rules panel as live proof that the mandate is contract-enforced, not UI-only.
+const GUARD_PROOF_TX = "52bb0f11d8b94c5a454f31966169f8a544c27257b01dac5d60357017800e928b";
 const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_AGENT_API_TOKEN ?? "";
 
 /* ------------------------------------------------------------- types */
@@ -738,6 +742,12 @@ export default function Dashboard() {
                   <i style={{ width: `${Math.min((dataSpend / budget) * 100, 100)}%` }} />
                 </div>
                 <div className="meter-cap">{t("budgetUsed", { used: cspr(dataSpend), total: cspr(budget) })}</div>
+                <p className="guard-proof">
+                  {t("guardProof")}{" "}
+                  <a href={`https://testnet.cspr.live/transaction/${GUARD_PROOF_TX}`} target="_blank" rel="noreferrer">
+                    {t("guardProofLink")} ↗
+                  </a>
+                </p>
               </>
             ) : (
               <div className="empty">{t("connecting")}</div>
