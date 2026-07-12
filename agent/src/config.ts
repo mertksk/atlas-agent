@@ -91,6 +91,11 @@ export const config = {
   // its own key. Instead, every ALLOCATE becomes a user-signed CSPR transfer (the
   // connected wallet signs it, its own CSPR moves). Default on for the dApp.
   nonCustodial: bool(process.env.NON_CUSTODIAL, true),
+  // Non-custodial guards EXECUTION (user funds move only with the user's own
+  // signature) — but the audit trail can still go on-chain: each decision is
+  // recorded on the DecisionRegistry with the AGENT key (gas only, ~3.5 CSPR
+  // per decision, paid from the fee-funded agent account; no user funds).
+  recordDecisions: bool(process.env.RECORD_DECISIONS, true),
   // Where a user-signed allocation lands (the managed strategy account). MUST be
   // a public key hex (01…/02…) — the native transfer builder needs one.
   allocationRecipientHex:

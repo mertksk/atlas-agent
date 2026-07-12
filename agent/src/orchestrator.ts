@@ -273,11 +273,39 @@ export async function runPipeline(opts: OrchestratorOptions = {}): Promise<RunRe
     // ---------------------------------------------------------------- executor
     const finalAmount = verdict.clampedAmountCspr;
 
-    // Non-custodial: the agent never moves money or writes to chain with its own
-    // key. Decisions live in this ledger, and every ALLOCATE becomes a
-    // user-signed CSPR transfer (handled by the API's pending-allocation flow).
+    // Non-custodial: the agent never moves the USER's money — every ALLOCATE
+    // becomes a user-signed CSPR transfer (handled by the API's
+    // pending-allocation flow). The decision itself is still recorded on the
+    // DecisionRegistry with the agent's own key (gas only, no funds move), so
+    // the on-chain audit trail stays live.
     if (config.nonCustodial) {
-      const onChain = { recorded: false, executed: false, dryRun: false };
+      const onChain =
+        config.recordDecisions && !config.dryRun
+          ? {
+              ...(await recordDecisionOnChain({
+                opportunityId: o.id,
+                action: verdict.finalAction,
+                confidence: decision.confidence,
+                riskScore: decision.riskScore,
+                amountCspr: finalAmount,
+                dataCostMotes,
+                dataSources: purchased.map((p) => p.source),
+                reason: decision.reason,
+              })),
+              executed: false,
+            }
+          : { recorded: false, executed: false, dryRun: config.dryRun };
+      if (onChain.recorded) {
+        log(
+          "executor",
+          `${o.id}: decision${onChain.decisionId != null ? ` #${onChain.decisionId}` : ""} recorded on the DecisionRegistry (Casper Testnet).`,
+        );
+      } else if (onChain.error) {
+        log(
+          "executor",
+          `${o.id}: on-chain record failed (run continues): ${String(onChain.error).replace(/\s+/g, " ").slice(0, 200)}`,
+        );
+      }
       if (verdict.finalAction === "ALLOCATE" && finalAmount > 0) {
         log("executor", `${o.id}: ${finalAmount} CSPR ready for your signature — sign in the dashboard to invest (non-custodial).`);
       } else {

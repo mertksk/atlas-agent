@@ -183,6 +183,9 @@ const en = {
   spotSwapT: "An instant token swap on the DEX — not a yield position, so no APY. The live rate and pool depth are in the description below.",
   yourTokens: "tokens in your wallet",
   yourTokensT: "Your CEP-18 token balances, read live from the chain via CSPR.Cloud — this on-chain-verifies the WUSDC you received from the swap.",
+  lastAnalysis: "Last analysis: {when}",
+  reRunHint: "the verdicts below are from that run. Hit “pay {amount} CSPR & run” for a fresh analysis.",
+  feeInsufficient: "Not enough CSPR for the {fee} CSPR usage fee — your wallet holds {bal} CSPR. Top up from the testnet faucet.",
 };
 export type StrKey = keyof typeof en;
 type Dict = Partial<Record<StrKey, string>>;
@@ -287,6 +290,9 @@ const tr: Dict = {
   spotSwapT: "DEX'te anlık token takası — getiri pozisyonu değil, o yüzden APY yok. Canlı kur ve havuz derinliği aşağıdaki açıklamada.",
   yourTokens: "cüzdanındaki token'lar",
   yourTokensT: "CEP-18 token bakiyelerin, CSPR.Cloud üzerinden zincirden canlı okunur — swap'tan aldığın WUSDC'yi zincir-üstü doğrular.",
+  lastAnalysis: "Son analiz: {when}",
+  reRunHint: "aşağıdaki hükümler o koşudan. Güncel analiz için “{amount} CSPR öde ve çalıştır”a bas.",
+  feeInsufficient: "{fee} CSPR kullanım ücreti için bakiye yetersiz — cüzdanında {bal} CSPR var. Testnet musluğundan yükleyebilirsin.",
 };
 
 const es: Dict = {
