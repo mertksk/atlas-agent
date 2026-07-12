@@ -48,6 +48,7 @@ interface State {
   pendingApprovals: Approval[];
   pendingAllocations: PendingAlloc[];
   nonCustodial?: boolean;
+  lastRunId?: string;
   lastRunDataCostCspr: number;
   llm: boolean;
   reasoner?: string;
@@ -62,6 +63,7 @@ interface Opp {
 }
 interface Decision {
   runId: string;
+  at?: string;
   opportunityId: string;
   action: "ALLOCATE" | "REJECT" | "HOLD" | "QUEUE_FOR_APPROVAL";
   amountCspr: number;
@@ -118,6 +120,16 @@ const ROLE_COLOR: Record<string, string> = {
 };
 
 const cspr = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+/** "5 minutes ago" / "5 dakika önce" — localized via Intl, no dictionary needed. */
+const timeAgo = (iso: string, locale: string): string => {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  if (mins < 60) return rtf.format(-mins, "minute");
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return rtf.format(-hours, "hour");
+  return rtf.format(-Math.round(hours / 24), "day");
+};
 const fmtDur = (s?: number) => {
   if (s == null) return "—";
   if (s < 60) return `${Math.round(s)}s`;
@@ -397,6 +409,11 @@ export default function Dashboard() {
     // the run starts directly with the token.
     const headers: Record<string, string> = { ...authHeaders() };
     if (wallet) {
+      // Fail fast with a clear message instead of a doomed fee deploy.
+      if (walletBal != null && walletBal < feeCspr) {
+        setNotice(t("feeInsufficient", { fee: feeCspr, bal: walletBal.toFixed(1) }));
+        return;
+      }
       headers["X-Wallet"] = wallet; // run into THIS wallet's session
       const credit = await payFee();
       if (!credit) return;
@@ -447,8 +464,17 @@ export default function Dashboard() {
     }
   };
 
+  // Verdict badges reflect only the LATEST run — older runs' INVESTED/REJECTED
+  // stamps would otherwise pin on the cards forever and read as current advice.
   const latest = new Map<string, Decision>();
-  for (const d of decisions) latest.set(d.opportunityId, d);
+  const lastRunId = state?.lastRunId;
+  for (const d of decisions) {
+    if (!lastRunId || d.runId === lastRunId) latest.set(d.opportunityId, d);
+  }
+  const lastAnalysisAt = [...latest.values()].reduce<string | null>(
+    (m, d) => (d.at && (m == null || d.at > m) ? d.at : m),
+    null,
+  );
 
   const dataSpend = state?.lastRunDataCostCspr ?? 0;
   const budget = state?.policy.dataBudgetCspr ?? 1;
@@ -823,6 +849,13 @@ export default function Dashboard() {
           {!wallet && opps.length > 0 && (
             <div className="connect-hint">
               <b>{t("connectToStart")}</b> — {t("verdictsHint")}
+            </div>
+          )}
+
+          {wallet && latest.size > 0 && lastAnalysisAt && (
+            <div className="connect-hint">
+              <b>{t("lastAnalysis", { when: timeAgo(lastAnalysisAt, lang) })}</b> —{" "}
+              {t("reRunHint", { amount: feeCspr })}
             </div>
           )}
 
