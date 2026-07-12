@@ -186,6 +186,8 @@ const en = {
   lastAnalysis: "Last analysis: {when}",
   reRunHint: "the verdicts below are from that run. Hit “pay {amount} CSPR & run” for a fresh analysis.",
   feeInsufficient: "Not enough CSPR for the {fee} CSPR usage fee — your wallet holds {bal} CSPR. Top up from the testnet faucet.",
+  guardProof: "Not just UI: the vault contract physically rejects any move that breaks this mandate. Here's a real over-budget allocation it refused on-chain:",
+  guardProofLink: "the rejected transaction · CSPR.live",
 };
 export type StrKey = keyof typeof en;
 type Dict = Partial<Record<StrKey, string>>;
@@ -293,6 +295,8 @@ const tr: Dict = {
   lastAnalysis: "Son analiz: {when}",
   reRunHint: "aşağıdaki hükümler o koşudan. Güncel analiz için “{amount} CSPR öde ve çalıştır”a bas.",
   feeInsufficient: "{fee} CSPR kullanım ücreti için bakiye yetersiz — cüzdanında {bal} CSPR var. Testnet musluğundan yükleyebilirsin.",
+  guardProof: "Sadece arayüz değil: vault kontratı bu mandate'i aşan her hamleyi zincir üstünde bizzat reddeder. İşte kasayı aşan gerçek bir talebin zincirdeki reddi:",
+  guardProofLink: "reddedilen işlem · CSPR.live",
 };
 
 const es: Dict = {
