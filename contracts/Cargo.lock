@@ -1915,9 +1915,9 @@ dependencies = [
 
 [[package]]
 name = "odra-casper-livenet-env"
-version = "2.8.2"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74fea8c1b635a48c4015ff8316f3db65e94724118aece2e5dd6cb7f86c96dde3"
+checksum = "a95fe10f6ebba079524edbd1eeb0011fd8839f55625225d67bdca4d81753e098"
 dependencies = [
  "anyhow",
  "blake2 0.10.6",
@@ -1931,9 +1931,9 @@ dependencies = [
 
 [[package]]
 name = "odra-casper-rpc-client"
-version = "2.8.2"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64da672d6d10328e4451484c28a09ec45b3308db4649efea9a84ffa841d961a5"
+checksum = "6e672f808c9de6bb45fdfe1f324521abfdc049066bf85932d5b9a3d9e1300701"
 dependencies = [
  "base16",
  "bytes",
@@ -1981,9 +1981,9 @@ dependencies = [
 
 [[package]]
 name = "odra-core"
-version = "2.8.2"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "510bd2546b09db5556a8e947fbdd2a38b1cff67d2deba253bec190bb7e868137"
+checksum = "62c0916de173840d88f33b09c13073f0e935a4b7385764d6cdd15d21a1ec33a9"
 dependencies = [
  "anyhow",
  "casper-event-standard",
@@ -2012,9 +2012,9 @@ dependencies = [
 
 [[package]]
 name = "odra-schema"
-version = "2.8.2"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "488acf36729f272456a94a440c080b78833c77304418ba3791d808ac5b1dc28c"
+checksum = "b2246b2ecd220e968316efeb4ecb1d4a5317e40166b59086f0575a79d5010e4c"
 dependencies = [
  "casper-contract-schema",
  "casper-types",
